@@ -1,5 +1,5 @@
 import { and, desc, eq, type SQL } from "drizzle-orm";
-import { ContentEventSchema, type ContentEvent } from "@aur/schemas";
+import { ContentEventSchema, type ContentEvent } from "@inertial/schemas";
 import type { DbExecutor } from "../executor.js";
 import { contentEvents } from "../schema.js";
 import { nullToUndef, toIso } from "../utils.js";

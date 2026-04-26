@@ -1,4 +1,4 @@
-// Schema (tables + enums) — also available via `@aur/db/schema` for callers
+// Schema (tables + enums) — also available via `@inertial/db/schema` for callers
 // that only need types and want to skip the runtime client.
 export * from "./schema.js";
 

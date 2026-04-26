@@ -1,5 +1,5 @@
 {
-  "name": "@aur/sdk",
+  "name": "@inertial/sdk",
   "version": "0.0.1",
   "private": true,
   "description": "Public SDK surface for external consumers. Wraps the gateway webhook contract.",
@@ -20,7 +20,7 @@
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@aur/schemas": "workspace:*"
+    "@inertial/schemas": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.3"

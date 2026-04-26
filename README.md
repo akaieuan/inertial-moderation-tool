@@ -1,4 +1,4 @@
-# aur
+# inertial
 
 **Open-source AI content moderation with human-in-the-loop review.** Multimodal across text, image, video, and audio. Built for federated platforms (Mastodon, Bluesky, Lemmy) and centralized ones (Discord, Slack, custom apps). Compose any agent stack — heuristics, local models, cloud LLMs — under one auditable pipeline that keeps humans in authority.
 
@@ -10,14 +10,26 @@
 
 > **Status — pre-alpha (month 1 of 3).** The kernel is real and tested. The agent and connector roster is sparse. APIs will change.
 
-`aur` is two things in one monorepo:
+`inertial` is two things in one monorepo:
 
-1. **`@aur/*` toolkit** — orchestration, persistence, policy, and HITL primitives. Sibling to [`eval-kit`](https://github.com/akaieuan/eval-kit) and [`HITL-KIT`](https://github.com/akaieuan/HITL-KIT).
-2. **`aur-app`** — Electron + React + Tailwind reference dashboard for moderators, built on HITL-KIT.
+1. **`@inertial/*` toolkit** — orchestration, persistence, policy, and HITL primitives. Sibling to [`eval-kit`](https://github.com/akaieuan/eval-kit) and [`HITL-KIT`](https://github.com/akaieuan/HITL-KIT).
+2. **`@inertial/app`** — Electron + React + Tailwind reference dashboard for moderators, built on HITL-KIT.
 
 ---
 
-## Why aur exists
+## Naming
+
+The project takes its vocabulary from Philip K. Dick's *Ubik* (1969):
+
+- **inertial** — In *Ubik*, "inertials" are anti-telepaths whose function is to neutralize harmful psychic intrusion on behalf of clients. That's the metaphor: the toolkit's sub-agents are *inertials* — each one neutralizes a class of harmful signal (toxicity, spam, NSFW, identity hate, brigading…) for the communities it serves.
+- **Runciter** — Glen Runciter, the operator who runs the prudence organization that *dispatches* the inertials. The orchestrator class in `@inertial/core` is `Runciter`; the host process is `apps/runciter`. Code reads as: `runciter.dispatch(event) → inertials emit StructuredSignals`.
+- **structured signals** — what inertials emit. Probability + confidence + evidence pointers. Never verdicts. The policy layer turns signals into routing decisions; humans turn routing decisions into actions.
+
+If you only remember one rule: **inertials emit signals; the Runciter dispatches them; humans decide.**
+
+---
+
+## Why inertial exists
 
 Online platforms have an AI-moderation problem and a human-trust problem at the same time:
 
@@ -26,14 +38,14 @@ Online platforms have an AI-moderation problem and a human-trust problem at the 
 
 The pattern is the same in both worlds: an AI makes a black-box call, a human ends up rubber-stamping it (or fighting it), and nobody can audit what actually happened.
 
-**aur is the human-in-the-loop AI moderation layer that fixes both.** It treats the AI as a decomposed *signal generator*, not a verdict-maker:
+**inertial is the human-in-the-loop AI moderation layer that fixes both.** It treats the AI as a decomposed *signal generator*, not a verdict-maker:
 
-- Agents emit *typed structured signals* (probability + confidence + evidence pointers), not "remove this post"
+- Inertials (sub-agents) emit *typed structured signals* (probability + confidence + evidence pointers), not "remove this post"
 - A per-instance policy engine turns signals into routing decisions (queue.quick, queue.deep, escalate)
-- Reviewers see the signals, the agent's reasoning trace, and the policy rule that fired — then they decide
+- Reviewers see the signals, the inertial's reasoning trace, and the policy rule that fired — then they decide
 - Every decision and signal lands in a hash-chained audit log; tampering is detectable, compliance is provable
 
-And because moderators have wildly different privacy budgets, aur lets them compose:
+And because moderators have wildly different privacy budgets, inertial lets them compose:
 
 - **Heuristics** — regex, perceptual hash matching, blocklists. Zero cost, zero data leaves the machine.
 - **Small local models** — toxicity classifiers, NER, Whisper, NSFW detectors running in-process. Total privacy, modest capability.
@@ -56,9 +68,9 @@ Same toolkit, different points on the curve. A 200-user fediverse instance with 
                        │
                        ▼
                 ┌─────────────┐
-                │   Worker    │  Orchestrator runtime. Fans out to agents
-                │             │  matching event.modalities. Aggregates
-                │             │  signals (max-confidence on collision).
+                │  Runciter   │  Orchestrator runtime (apps/runciter).
+                │             │  Dispatches inertials matching event.modalities.
+                │             │  Aggregates signals (max-confidence on collision).
                 └──────┬──────┘
         ┌──────────────┼──────────────┐
         ▼              ▼              ▼
@@ -66,47 +78,47 @@ Same toolkit, different points on the curve. A 200-user fediverse instance with 
   │  text-   │  │  phash-  │  │   ...    │    Tier 1 (transformers.js WASM)
   │  regex   │  │ similar  │  │ vision-  │    Tier 2 (Ollama @ :11434)
   │          │  │          │  │  ollama  │    Tier 3 (Anthropic / OpenAI)
-  └────┬─────┘  └────┬─────┘  └────┬─────┘
+  └────┬─────┘  └────┬─────┘  └────┬─────┘    (each box = one inertial)
        └─────────────┼─────────────┘
                      ▼
               ┌─────────────┐
               │ Aggregator  │  StructuredSignal: channels record + entities
               └──────┬──────┘  + agentsRun + agentsFailed + latencyMs
                      ▼
-              ┌─────────────┐
-              │ @aur/policy │  Per-instance YAML rules over signal.
-              │  evaluator  │  Emits PolicyAction (queue.quick / queue.deep
-              └──────┬──────┘  / escalate / auto-allow / auto-remove).
+              ┌──────────────────┐
+              │ @inertial/policy │  Per-instance YAML rules over signal.
+              │    evaluator     │  Emits PolicyAction (queue.quick / queue.deep
+              └──────┬───────────┘  / escalate / auto-allow / auto-remove).
                      │
         ┌────────────┴────────────┐
         ▼                         ▼
-  ┌──────────┐            ┌──────────┐
-  │ReviewItem│  ◀─────────│ aur-app  │  Reviewer commits ReviewDecision.
-  │ (queue)  │            │ (Electron│  Decision + signalFeedback flow
-  └────┬─────┘            │ + HITL)  │  back into the eval harness.
-       │                  └──────────┘
+  ┌──────────┐            ┌──────────────┐
+  │ReviewItem│  ◀─────────│ @inertial/app│  Reviewer commits ReviewDecision.
+  │ (queue)  │            │  (Electron + │  Decision + signalFeedback flow
+  └────┬─────┘            │    HITL)     │  back into the eval harness.
+       │                  └──────────────┘
        ▼
-  ┌─────────────┐
-  │   @aur/db   │  Hash-chained audit log: every state transition writes one
-  │ (Postgres + │  entry per instance. prevHash → hash linkage; tamper-detectable.
-  │  pgvector)  │
-  └─────────────┘
+  ┌─────────────────┐
+  │  @inertial/db   │  Hash-chained audit log: every state transition writes one
+  │  (Postgres +    │  entry per instance. prevHash → hash linkage; tamper-detectable.
+  │    pgvector)    │
+  └─────────────────┘
 ```
 
-Every box has a corresponding `@aur/*` package. Every cross-package shape is a Zod schema in `@aur/schemas` — when you add a new agent or signal type, the contract change happens there first.
+Every box has a corresponding `@inertial/*` package. Every cross-package shape is a Zod schema in `@inertial/schemas` — when you add a new inertial or signal type, the contract change happens there first.
 
 ---
 
 ## Choose your tier
 
-`aur` doesn't pick for you. The four tiers compose in any combination, configured per-instance.
+`inertial` doesn't pick for you. The four tiers compose in any combination, configured per-instance.
 
 | Tier | Where it runs | Install | Best at | Privacy |
 |---|---|---|---|---|
 | **0. Heuristic** | In-process JS | nothing | URL spam, known-bad image phash, blocklists | Total — no model, no network |
 | **1. Local WASM** | `@huggingface/transformers` ONNX runtime | nothing — model auto-downloads to `~/.cache/huggingface/hub` | Text toxicity, NER, image NSFW, Whisper transcription | Total — local-only after first download |
 | **2. Local server** | Ollama daemon at `localhost:11434` | `brew install ollama && ollama pull llama3.2-vision` | Better text reasoning, multimodal vision-language | Total |
-| **3. Cloud** | Anthropic / OpenAI / Google APIs | `@aur/agents-cloud` package (separate, opt-in) + API key | Subtle / coded text, video temporal reasoning, multi-event context | Up to operator |
+| **3. Cloud** | Anthropic / OpenAI / Google APIs | `@inertial/agents-cloud` package (separate, opt-in) + API key | Subtle / coded text, video temporal reasoning, multi-event context | Up to operator |
 
 ### Honest capability matrix
 
@@ -120,7 +132,7 @@ Every box has a corresponding `@aur/*` package. Every cross-package shape is a Z
 | Video temporal reasoning | phash on keyframes only | frame-by-frame at best | frame-by-frame | ~75% with multi-frame context |
 | Cross-event ("is this brigading?") | none | none | none | only Tier 3 |
 
-Local-first is not a magic bullet. **For high-stakes content (minor detection, video understanding, coordinated attacks), cloud is currently the only adequate tier.** The point of aur isn't to replace cloud — it's to make the routing legible and the data flow auditable.
+Local-first is not a magic bullet. **For high-stakes content (minor detection, video understanding, coordinated attacks), cloud is currently the only adequate tier.** The point of inertial isn't to replace cloud — it's to make the routing legible and the data flow auditable.
 
 ---
 
@@ -129,8 +141,8 @@ Local-first is not a magic bullet. **For high-stakes content (minor detection, v
 Requires Node ≥20 and pnpm 10.
 
 ```bash
-git clone https://github.com/akaieuan/aur-moderation-tool aur
-cd aur
+git clone https://github.com/akaieuan/inertial inertial
+cd inertial
 pnpm install
 pnpm build
 ```
@@ -138,12 +150,12 @@ pnpm build
 Three terminals:
 
 ```bash
-# 1. Worker — orchestrator + in-memory pglite. First boot downloads
+# 1. Runciter — orchestrator + in-memory pglite. First boot downloads
 #    toxic-bert (~250MB) to ~/.cache/huggingface/hub. ~30s one-time.
-pnpm --filter @aur/worker dev
+pnpm --filter @inertial/runciter dev
 
 # 2. Gateway — HTTP ingest on :4000
-pnpm --filter @aur/gateway dev
+pnpm --filter @inertial/gateway dev
 
 # 3. Seed 10 hand-crafted events through the full pipeline
 pnpm seed
@@ -167,17 +179,19 @@ Note event #5: toxic-bert misses the threat at 0.50 probability. **This is the d
 Then the dashboard:
 
 ```bash
-pnpm --filter @aur/aur-app dev
+pnpm --filter @inertial/app dev
 ```
 
-The Queue tab pulls live data from the worker, lets you expand each item to see post text + per-agent traces, and approve/remove commits a `ReviewDecision` with a hash-chained audit entry.
+The Queue tab pulls live data from the Runciter, lets you expand each item to see post text + per-inertial traces, and approve/remove commits a `ReviewDecision` with a hash-chained audit entry.
 
 For real Postgres persistence:
 
 ```bash
 pnpm db:up && pnpm db:migrate
-DATABASE_URL=postgres://aur:aur@localhost:5432/aur pnpm --filter @aur/worker dev
+DATABASE_URL=postgres://aur:aur@localhost:5432/aur pnpm --filter @inertial/runciter dev
 ```
+
+> **Note:** The Postgres user/db/container is still named `aur` for now (renaming requires destroying the local volume). It will move to `inertial` in a follow-up that is scheduled when local state can be safely nuked.
 
 ---
 
@@ -187,19 +201,19 @@ Be honest about pre-alpha state.
 
 | Component | Status |
 |---|---|
-| `@aur/schemas` | Real. 8 Zod schemas (ContentEvent, StructuredSignal, AgentTrace, ReviewItem, ReviewDecision, Policy, AuditEntry, supporting unions). |
-| `@aur/core` | Real. BaseAgent + TraceCollector + InMemoryOrchestrator + max-confidence aggregator. |
-| `@aur/db` | Real. 8 tables (7 schema-mirrored + event_embeddings). 41 hermetic integration tests. Hash-chained audit with tamper detection. pglite dev factory + postgres-js prod. |
-| `@aur/policy` | Real. YAML loader + structured AST evaluator. First-match wins; per-instance versioning. |
-| `apps/gateway` | Real. Hono ingest, normalizes payloads, forwards to worker. |
-| `apps/worker` | Real. Orchestrator runtime, persists through `@aur/db`, evaluates policy, creates review items, audits every step. |
-| `apps/aur-app` | Real. Electron + React + Tailwind v4 + HITL-KIT. Queue + Eval views. |
-| `text-regex` (Tier 0 agent) | Real. URL detection. |
-| `text-toxicity-local` (Tier 1 agent) | Real. `@huggingface/transformers` running `Xenova/toxic-bert`. ~50ms/event after warmup. |
-| `vision-*`, `video-*`, `audio-*`, `identity-*`, `context-*` agents | Stubbed. Empty `analyze()` returning `[]`. |
+| `@inertial/schemas` | Real. 8 Zod schemas (ContentEvent, StructuredSignal, AgentTrace, ReviewItem, ReviewDecision, Policy, AuditEntry, supporting unions). |
+| `@inertial/core` | Real. BaseAgent + TraceCollector + InMemoryRunciter (orchestrator) + max-confidence aggregator. |
+| `@inertial/db` | Real. 8 tables (7 schema-mirrored + event_embeddings). 41 hermetic integration tests. Hash-chained audit with tamper detection. pglite dev factory + postgres-js prod. |
+| `@inertial/policy` | Real. YAML loader + structured AST evaluator. First-match wins; per-instance versioning. |
+| `apps/gateway` | Real. Hono ingest, normalizes payloads, forwards to runciter. |
+| `apps/runciter` | Real. Runciter (orchestrator) runtime, persists through `@inertial/db`, evaluates policy, creates review items, audits every step. |
+| `apps/inertial-app` | Real. Electron + React + Tailwind v4 + HITL-KIT. Queue + Eval views. |
+| `text-regex` (Tier 0 inertial) | Real. URL detection. |
+| `text-toxicity-local` (Tier 1 inertial) | Real. `@huggingface/transformers` running `Xenova/toxic-bert`. ~50ms/event after warmup. |
+| `vision-*`, `video-*`, `audio-*`, `identity-*`, `context-*` inertials | Stubbed. Empty `analyze()` returning `[]`. |
 | `connectors-{activitypub,atproto,lemmy,sdk-webhook}` | Stubbed. |
-| `@aur/agents-cloud` (Tier 3) | Not yet a package. Planned. |
-| `@aur/eval` wrapping `@eval-kit/core` | Stubbed. UI primitives are wired in `aur-app`'s Eval tab. |
+| `@inertial/agents-cloud` (Tier 3) | Real. Anthropic-backed text-toxicity skill. |
+| `@inertial/eval` wrapping `@eval-kit/core` | Stubbed. UI primitives are wired in `@inertial/app`'s Eval tab. |
 
 ---
 
@@ -208,50 +222,51 @@ Be honest about pre-alpha state.
 ```
 apps/
   gateway/              Hono :4000 — ingest + normalize
-  worker/               Hono :4001 — orchestrate + persist + audit
-  aur-app/              Electron dashboard (HITL-KIT primitives)
+  runciter/             Hono :4001 — Runciter (orchestrator), persist + audit
+  inertial-app/         Electron dashboard (HITL-KIT primitives)
 packages/
-  schemas/              @aur/schemas         — Zod contracts
-  core/                 @aur/core            — BaseAgent, orchestrator, aggregator
+  schemas/              @inertial/schemas         — Zod contracts
+  core/                 @inertial/core            — BaseAgent, Runciter, aggregator
   agents/
-    text/               @aur/agents-text     — text-regex, text-toxicity-local
-    vision/             @aur/agents-vision   — (stub)
-    video/              @aur/agents-video    — (stub)
-    audio/              @aur/agents-audio    — (stub)
-    identity/           @aur/agents-identity — (stub)
-    context/            @aur/agents-context  — (stub)
+    text/               @inertial/agents-text     — text-regex, text-toxicity-local
+    cloud/              @inertial/agents-cloud    — Anthropic / OpenAI / Gemini skills
+    vision/             @inertial/agents-vision   — (stub)
+    video/              @inertial/agents-video    — (stub)
+    audio/              @inertial/agents-audio    — (stub)
+    identity/           @inertial/agents-identity — (stub)
+    context/            @inertial/agents-context  — (stub)
   connectors/
-    activitypub/        @aur/connectors-activitypub  — (stub)
-    atproto/            @aur/connectors-atproto      — (stub)
-    lemmy/              @aur/connectors-lemmy        — (stub)
-    sdk-webhook/        @aur/connectors-sdk-webhook  — (stub)
-  policy/               @aur/policy          — YAML loader + AST evaluator
-  db/                   @aur/db              — Drizzle + Postgres + pgvector + hash-chained audit
-  eval/                 @aur/eval            — wraps @eval-kit/core (stub)
-  sdk/                  @aur/sdk             — public SDK surface (stub)
-  registry/             @aur/registry        — shadcn-compatible UI primitives (stub)
+    activitypub/        @inertial/connectors-activitypub  — (stub)
+    atproto/            @inertial/connectors-atproto      — (stub)
+    lemmy/              @inertial/connectors-lemmy        — (stub)
+    sdk-webhook/        @inertial/connectors-sdk-webhook  — (stub)
+  policy/               @inertial/policy          — YAML loader + AST evaluator
+  db/                   @inertial/db              — Drizzle + Postgres + pgvector + hash-chained audit
+  eval/                 @inertial/eval            — wraps @eval-kit/core (stub)
+  sdk/                  @inertial/sdk             — public SDK surface (stub)
+  registry/             @inertial/registry        — shadcn-compatible UI primitives (stub)
 config/
   policies/
     default.yaml        Default policy (toxicity + spam-link rules)
   evals/                Gold sets, suites (empty)
 scripts/
-  seed.mjs              10 hand-crafted events through gateway → worker
+  seed.mjs              10 hand-crafted events through gateway → runciter
   smoke.mjs             Single-event smoke test
 docker-compose.yml      Postgres + pgvector for prod-shape persistence
 ```
 
 ---
 
-## Build your own agent
+## Build your own inertial
 
-A new agent is a class extending `BaseAgent`:
+A new inertial is a class extending `BaseAgent`:
 
 ```ts
-import { BaseAgent, type AgentContext } from "@aur/core";
-import type { ContentEvent, Modality, SignalChannel } from "@aur/schemas";
+import { BaseAgent, type AgentContext } from "@inertial/core";
+import type { ContentEvent, Modality, SignalChannel } from "@inertial/schemas";
 
-export class MyAgent extends BaseAgent {
-  readonly name = "my-agent";
+export class MyInertial extends BaseAgent {
+  readonly name = "my-inertial";
   readonly modalities: readonly Modality[] = ["text"];
   readonly model = "my-model-v0";
 
@@ -282,10 +297,10 @@ export class MyAgent extends BaseAgent {
 }
 ```
 
-Then register it in the worker:
+Then register it with the Runciter:
 
 ```ts
-new InMemoryOrchestrator([new TextRegexAgent(), new MyAgent()]);
+new InMemoryRunciter([new TextRegexAgent(), new MyInertial()]);
 ```
 
 The `BaseAgent.run()` lifecycle wraps `analyze()` with timing, error capture, and trace finalization. Every emitted channel is auto-recorded as a `decision` step in `AgentTrace.steps`.
@@ -344,26 +359,26 @@ Conditions form a tree: leaf (`channel + op + value` or `entity + present`), `al
 
 **Done (month 1):**
 
-- Pillar 0 — schemas, core, gateway/worker shells, end-to-end smoke
-- Pillar 1 — `@aur/db` persistence with hash-chained audit + 41 tests
+- Pillar 0 — schemas, core, gateway/runciter shells, end-to-end smoke
+- Pillar 1 — `@inertial/db` persistence with hash-chained audit + 41 tests
 - Pillar 2 — orchestration upgrade with real toxicity classifier + DB-persisted pipeline + dashboard reading live data + decision flow
 
 **Next:**
 
-- **Pillar 4 — Skills + tools layer.** Refactor agents to compose reusable skills (`classify-toxicity`, `extract-pii`, `lookup-author-history`). Tool registry backed by `@aur/db` (author lookup, similarity search, phash query). Per-instance skill allow/block lists.
-- **Pillar 3 — Context engine.** Drops out of the tools layer — pgvector similarity search + author history queries powered by `@aur/db`.
-- **Real agents.** `vision-ollama` (LLaVA / qwen2.5-vl), `audio-whisper-local`, `phash-similarity`, then `@aur/agents-cloud` (Anthropic, OpenAI, Gemini).
-- **Pipeline stages with budgets.** Per-modality cost caps, confidence-based escalation: cheap triage agents short-circuit when confident; only the ambiguous middle goes to cloud.
-- **Pillar 5 — Shadow / puppet runs.** Agents run silently alongside reviewers; decisions become free gold-set entries. Continuous evaluation graded by the actual operator.
+- **Pillar 4 — Skills + tools layer.** Refactor inertials to compose reusable skills (`classify-toxicity`, `extract-pii`, `lookup-author-history`). Tool registry backed by `@inertial/db` (author lookup, similarity search, phash query). Per-instance skill allow/block lists.
+- **Pillar 3 — Context engine.** Drops out of the tools layer — pgvector similarity search + author history queries powered by `@inertial/db`.
+- **Real inertials.** `vision-ollama` (LLaVA / qwen2.5-vl), `audio-whisper-local`, `phash-similarity`, then expanded `@inertial/agents-cloud` (Anthropic, OpenAI, Gemini).
+- **Pipeline stages with budgets.** Per-modality cost caps, confidence-based escalation: cheap triage inertials short-circuit when confident; only the ambiguous middle goes to cloud.
+- **Pillar 5 — Shadow / puppet runs.** Inertials run silently alongside reviewers; decisions become free gold-set entries. Continuous evaluation graded by the actual operator.
 - **Real connectors.** ActivityPub / AT Protocol firehose subscribers.
-- **Eval harness.** Wire `@aur/eval` into `@eval-kit/core`. Per-agent calibration tracking (Brier, ECE).
+- **Eval harness.** Wire `@inertial/eval` into `@eval-kit/core`. Per-inertial calibration tracking (Brier, ECE).
 
 ---
 
 ## Sibling projects
 
-- [`eval-kit`](https://github.com/akaieuan/eval-kit) — evaluation framework for collaborative-task agents. `aur` uses `@eval-kit/ui` primitives in its eval cockpit and will use `@eval-kit/core` for calibration scoring.
-- [`HITL-KIT`](https://github.com/akaieuan/HITL-KIT) — human-in-the-loop UI primitives. `aur-app`'s queue and review screens are built on `MiniTrace`, `HitlCard`, `BatchQueue`, `AiGenerationScale`, and `ApproveRejectRow` from the [hitlkit.dev](https://hitlkit.dev) shadcn registry.
+- [`eval-kit`](https://github.com/akaieuan/eval-kit) — evaluation framework for collaborative-task agents. `inertial` uses `@eval-kit/ui` primitives in its eval cockpit and will use `@eval-kit/core` for calibration scoring.
+- [`HITL-KIT`](https://github.com/akaieuan/HITL-KIT) — human-in-the-loop UI primitives. `@inertial/app`'s queue and review screens are built on `MiniTrace`, `HitlCard`, `BatchQueue`, `AiGenerationScale`, and `ApproveRejectRow` from the [hitlkit.dev](https://hitlkit.dev) shadcn registry.
 
 ---
 

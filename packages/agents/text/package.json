@@ -1,5 +1,5 @@
 {
-  "name": "@aur/agents-text",
+  "name": "@inertial/agents-text",
   "version": "0.0.1",
   "private": true,
   "description": "Text-modality agent. Emits text-derived signals (spam, toxicity, hate, PII).",
@@ -20,8 +20,8 @@
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@aur/core": "workspace:*",
-    "@aur/schemas": "workspace:*",
+    "@inertial/core": "workspace:*",
+    "@inertial/schemas": "workspace:*",
     "@huggingface/transformers": "^3.3.3"
   },
   "devDependencies": {

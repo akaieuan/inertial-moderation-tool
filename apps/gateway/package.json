@@ -1,5 +1,5 @@
 {
-  "name": "@aur/gateway",
+  "name": "@inertial/gateway",
   "version": "0.0.1",
   "private": true,
   "description": "Hono ingest service. Normalizes inbound platform payloads into ContentEvents and forwards to the worker.",
@@ -13,7 +13,7 @@
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@aur/schemas": "workspace:*",
+    "@inertial/schemas": "workspace:*",
     "hono": "^4.6.14",
     "@hono/node-server": "^1.13.7",
     "zod": "^3.24.1"

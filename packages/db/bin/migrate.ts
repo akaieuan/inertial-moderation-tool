@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * Programmatic migration runner. Used by `pnpm --filter @aur/db db:migrate`
+ * Programmatic migration runner. Used by `pnpm --filter @inertial/db db:migrate`
  * and by the CI harness. Honours DATABASE_URL.
  *
  * Before running drizzle-kit's migrator, we install pgvector and verify the

@@ -6,7 +6,7 @@ import type {
   ReviewDecision,
   ReviewItem,
   StructuredSignal,
-} from "@aur/schemas";
+} from "@inertial/schemas";
 
 export function makeContentEvent(overrides: Partial<ContentEvent> = {}): ContentEvent {
   const now = new Date().toISOString();

@@ -1,4 +1,4 @@
-import type { AgentTrace, SignalChannel, TraceStep } from "@aur/schemas";
+import type { AgentTrace, SignalChannel, TraceStep } from "@inertial/schemas";
 
 export interface TraceFinalizeMeta {
   agent: string;

@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { StructuredSignalSchema, type StructuredSignal } from "@aur/schemas";
+import { StructuredSignalSchema, type StructuredSignal } from "@inertial/schemas";
 import type { DbExecutor } from "../executor.js";
 import { structuredSignals } from "../schema.js";
 import { toIso } from "../utils.js";

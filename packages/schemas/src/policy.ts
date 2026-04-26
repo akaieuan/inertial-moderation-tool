@@ -4,7 +4,7 @@ import { z } from "zod";
  * Action the PolicyEngine emits after evaluating signals against rules.
  * Each instance/platform configures which signals lead to which action.
  *
- * The aur philosophy: an `action` is a *recommendation* until a human approves.
+ * The inertial philosophy: an `action` is a *recommendation* until a human approves.
  * The auto-* actions still emit an audit row even when not human-reviewed.
  */
 export const PolicyActionSchema = z.discriminatedUnion("kind", [

@@ -3,7 +3,7 @@ import { z } from "zod";
 /**
  * Audit log entry. Append-only, hash-chained for tamper detection.
  *
- * Every state-changing operation in aur emits one of these:
+ * Every state-changing operation in inertial emits one of these:
  *   - content event ingested
  *   - signal generated
  *   - policy rule matched

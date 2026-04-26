@@ -1,5 +1,5 @@
-import { BaseAgent, type AgentContext } from "@aur/core";
-import type { ContentEvent, Modality, SignalChannel } from "@aur/schemas";
+import { BaseAgent, type AgentContext } from "@inertial/core";
+import type { ContentEvent, Modality, SignalChannel } from "@inertial/schemas";
 import { pipeline, type TextClassificationPipeline } from "@huggingface/transformers";
 
 const MODEL_ID = "Xenova/toxic-bert";

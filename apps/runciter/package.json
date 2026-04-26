@@ -1,8 +1,8 @@
 {
-  "name": "@aur/worker",
+  "name": "@inertial/runciter",
   "version": "0.0.1",
   "private": true,
-  "description": "Orchestrator runtime. Receives ContentEvents, dispatches BaseAgents, returns StructuredSignal.",
+  "description": "Runciter \u2014 the orchestrator runtime. Receives ContentEvents, dispatches inertials (agents), aggregates StructuredSignals.",
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
@@ -13,11 +13,12 @@
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@aur/core": "workspace:*",
-    "@aur/db": "workspace:*",
-    "@aur/policy": "workspace:*",
-    "@aur/schemas": "workspace:*",
-    "@aur/agents-text": "workspace:*",
+    "@inertial/core": "workspace:*",
+    "@inertial/db": "workspace:*",
+    "@inertial/policy": "workspace:*",
+    "@inertial/schemas": "workspace:*",
+    "@inertial/agents-text": "workspace:*",
+    "@inertial/agents-cloud": "workspace:*",
     "hono": "^4.6.14",
     "@hono/node-server": "^1.13.7"
   },

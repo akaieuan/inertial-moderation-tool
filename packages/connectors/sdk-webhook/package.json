@@ -1,5 +1,5 @@
 {
-  "name": "@aur/connectors-sdk-webhook",
+  "name": "@inertial/connectors-sdk-webhook",
   "version": "0.0.1",
   "private": true,
   "description": "SDK webhook connector. Receives ContentEvents from external integrations via the public SDK.",
@@ -20,7 +20,7 @@
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@aur/schemas": "workspace:*"
+    "@inertial/schemas": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.3"

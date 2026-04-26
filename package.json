@@ -1,5 +1,5 @@
 {
-  "name": "aur",
+  "name": "inertial",
   "version": "0.0.1",
   "private": true,
   "description": "Multimodal AI content moderation toolkit + reference app. Federation-native, human-in-the-loop, structured signals not verdicts.",
@@ -20,8 +20,8 @@
     "db:up": "docker compose up -d postgres && docker compose exec -T postgres bash -c 'until pg_isready -U aur -d aur; do sleep 1; done'",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f postgres",
-    "db:migrate": "pnpm --filter @aur/db db:migrate",
-    "db:generate": "pnpm --filter @aur/db db:generate",
+    "db:migrate": "pnpm --filter @inertial/db db:migrate",
+    "db:generate": "pnpm --filter @inertial/db db:generate",
     "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {

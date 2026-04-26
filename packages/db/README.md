@@ -1,11 +1,11 @@
-# @aur/db
+# @inertial/db
 
-Drizzle + Postgres + pgvector persistence for `aur`.
+Drizzle + Postgres + pgvector persistence for `inertial`.
 
 Stores `ContentEvent`, `StructuredSignal`, `AgentTrace`, `ReviewItem`,
 `ReviewDecision`, `Policy`, `AuditEntry`, and per-event embeddings for
-similarity search. Every table mirrors a `@aur/schemas` Zod contract — adding
-a cross-package shape always starts in `@aur/schemas` and propagates here.
+similarity search. Every table mirrors a `@inertial/schemas` Zod contract — adding
+a cross-package shape always starts in `@inertial/schemas` and propagates here.
 
 ## Design invariants
 
@@ -37,6 +37,10 @@ pnpm db:migrate      # tsx packages/db/bin/migrate.ts
 The default connection string is `postgres://aur:aur@localhost:5432/aur`.
 Override with `DATABASE_URL`.
 
+> **Note:** The Postgres user/db is still named `aur` — renaming requires
+> destroying the local Docker volume (`aur_pg_data`). It will move to
+> `inertial` in a separate follow-up.
+
 To stop: `pnpm db:down`.
 
 ## Tests
@@ -45,7 +49,7 @@ Tests are hermetic — they spin up an in-memory pglite (Postgres-in-WASM with
 pgvector) per file. No Docker required.
 
 ```bash
-pnpm --filter @aur/db test
+pnpm --filter @inertial/db test
 ```
 
 41 tests cover schema round-trip parity, hash-chain integrity (including
@@ -56,7 +60,7 @@ cosine similarity search.
 
 ```bash
 # After editing src/schema.ts:
-pnpm --filter @aur/db db:generate    # writes migrations/NNNN_<name>.sql
+pnpm --filter @inertial/db db:generate    # writes migrations/NNNN_<name>.sql
 pnpm db:migrate                      # applies them
 ```
 
@@ -72,9 +76,9 @@ migrations should be checked for the same gotchas if they touch
 import {
   createDatabase,        // postgres-js factory
   events, signals, traces, review, policy, audit, embeddings, // repositories
-  // schema tables (also under "@aur/db/schema"):
+  // schema tables (also under "@inertial/db/schema"):
   contentEvents, structuredSignals, /* ... */
-} from "@aur/db";
+} from "@inertial/db";
 
 const { db, close } = createDatabase();
 await events.saveContentEvent(db, event);
@@ -108,7 +112,7 @@ await close();
 
 - Author + InstanceContext as first-class tables — denormalized into
   `content_events` until the query patterns require it.
-- Streaming change feed (`pg_notify` listener) — added when the worker needs
+- Streaming change feed (`pg_notify` listener) — added when the Runciter needs
   push-based reaction.
 - Row-level security — multi-tenancy is enforced at the application layer
   via `instance_id` filtering; RLS layered on top is a follow-up.

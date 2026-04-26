@@ -1,5 +1,5 @@
 {
-  "name": "@aur/agents-identity",
+  "name": "@inertial/agents-identity",
   "version": "0.0.1",
   "private": true,
   "description": "Identity agent. Emits author-level signals (sock-puppet score, age-of-account heuristics).",
@@ -20,8 +20,8 @@
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@aur/core": "workspace:*",
-    "@aur/schemas": "workspace:*"
+    "@inertial/core": "workspace:*",
+    "@inertial/schemas": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.3"

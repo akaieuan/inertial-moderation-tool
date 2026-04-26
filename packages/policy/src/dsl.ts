@@ -16,7 +16,7 @@
  * evaluator.ts.
  */
 import { z } from "zod";
-import { PolicyActionSchema } from "@aur/schemas";
+import { PolicyActionSchema } from "@inertial/schemas";
 
 const NumericOp = z.enum(["gt", "lt", "gte", "lte", "eq"]);
 
@@ -75,6 +75,33 @@ export const RuleSchema = z.object({
 });
 export type Rule = z.infer<typeof RuleSchema>;
 
+/** Per-instance skill governance. Empty allow-list = "everything registered". */
+export const SkillsBlockSchema = z.object({
+  allow: z.array(z.string()).optional(),
+  block: z.array(z.string()).default([]),
+  /** Hard gate — block any skill whose `dataLeavesMachine` matches. */
+  blockExecutionModel: z
+    .array(z.enum(["in-process", "local-server", "remote-api"]))
+    .default([]),
+  /** Hard gate — block any skill that would send data off the machine. */
+  blockDataLeavingMachine: z.boolean().default(false),
+});
+export type SkillsBlock = z.infer<typeof SkillsBlockSchema>;
+
+/**
+ * Escalation: after the base agent run, evaluate `when` against the partial
+ * signal; if it matches, run additional skills and merge their channels back
+ * in. The killer feature is "local triages, cloud catches the gaps."
+ */
+export const EscalationRuleSchema = z.object({
+  id: z.string(),
+  description: z.string().optional(),
+  when: ConditionSchema,
+  /** Skill names to run (in parallel) when `when` matches. */
+  run: z.array(z.string()).min(1),
+});
+export type EscalationRule = z.infer<typeof EscalationRuleSchema>;
+
 export const PolicyDocSchema = z.object({
   /** Stable instance identifier. Matches InstanceContext.id at runtime. */
   instance: z.string(),
@@ -89,6 +116,10 @@ export const PolicyDocSchema = z.object({
     kind: "auto-allow",
     reason: "no rule matched",
   }),
+  /** Per-instance skill governance. Optional — defaults to "all registered allowed". */
+  skills: SkillsBlockSchema.default({ block: [], blockExecutionModel: [], blockDataLeavingMachine: false }),
+  /** Escalation rules — run extra skills when intermediate signal matches a condition. */
+  escalation: z.array(EscalationRuleSchema).default([]),
   /** ISO timestamp; defaults to load time if absent in the YAML. */
   createdAt: z.string().datetime().optional(),
   createdBy: z.string().optional(),

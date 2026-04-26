@@ -44,5 +44,5 @@ export function createDatabase(options: CreateDatabaseOptions = {}): DatabaseHan
 }
 
 // Re-export the canonical Database type from the executor module so callers
-// can do `import type { Database } from "@aur/db"`.
+// can do `import type { Database } from "@inertial/db"`.
 export type { Database } from "./executor.js";

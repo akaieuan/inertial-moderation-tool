@@ -1,5 +1,5 @@
-import { BaseAgent, type AgentContext } from "@aur/core";
-import type { ContentEvent, Modality, SignalChannel } from "@aur/schemas";
+import { BaseAgent, type AgentContext } from "@inertial/core";
+import type { ContentEvent, Modality, SignalChannel } from "@inertial/schemas";
 
 export class VisionAgent extends BaseAgent {
   readonly name = "vision-agent";

@@ -68,7 +68,7 @@ export type EvidencePointer = z.infer<typeof EvidencePointerSchema>;
 /**
  * Single labeled signal channel emitted by an agent.
  * The `channel` is a stable string identifier (e.g. "nsfw", "hate-speech").
- * Channels are registered per-agent and documented in @aur/core.
+ * Channels are registered per-agent and documented in @inertial/core.
  */
 export const SignalChannelSchema = z.object({
   channel: z.string(),

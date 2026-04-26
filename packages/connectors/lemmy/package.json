@@ -1,5 +1,5 @@
 {
-  "name": "@aur/connectors-lemmy",
+  "name": "@inertial/connectors-lemmy",
   "version": "0.0.1",
   "private": true,
   "description": "Lemmy connector. Polls instance APIs for reports, emits ContentEvents.",
@@ -20,7 +20,7 @@
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@aur/schemas": "workspace:*"
+    "@inertial/schemas": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.3"

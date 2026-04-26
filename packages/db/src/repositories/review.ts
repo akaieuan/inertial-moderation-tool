@@ -7,7 +7,7 @@ import {
   type QueueKind,
   type ReviewState,
   type ReviewVerdict,
-} from "@aur/schemas";
+} from "@inertial/schemas";
 import type { DbExecutor } from "../executor.js";
 import { reviewDecisions, reviewItems } from "../schema.js";
 import { nullToUndef, toIso, toIsoOpt } from "../utils.js";

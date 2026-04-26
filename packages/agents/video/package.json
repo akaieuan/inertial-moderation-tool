@@ -1,5 +1,5 @@
 {
-  "name": "@aur/agents-video",
+  "name": "@inertial/agents-video",
   "version": "0.0.1",
   "private": true,
   "description": "Video-modality agent. Emits video-segment signals (frame-level NSFW, weapons, gore).",
@@ -20,8 +20,8 @@
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@aur/core": "workspace:*",
-    "@aur/schemas": "workspace:*"
+    "@inertial/core": "workspace:*",
+    "@inertial/schemas": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.3"

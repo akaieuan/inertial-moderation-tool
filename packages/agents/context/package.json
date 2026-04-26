@@ -1,5 +1,5 @@
 {
-  "name": "@aur/agents-context",
+  "name": "@inertial/agents-context",
   "version": "0.0.1",
   "private": true,
   "description": "Context agent. Emits cross-event similarity signals (brigading, repost clusters).",
@@ -20,8 +20,8 @@
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@aur/core": "workspace:*",
-    "@aur/schemas": "workspace:*"
+    "@inertial/core": "workspace:*",
+    "@inertial/schemas": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.3"

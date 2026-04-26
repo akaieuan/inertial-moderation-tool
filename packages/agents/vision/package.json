@@ -1,5 +1,5 @@
 {
-  "name": "@aur/agents-vision",
+  "name": "@inertial/agents-vision",
   "version": "0.0.1",
   "private": true,
   "description": "Vision-modality agent. Emits image-derived signals (NSFW, violence, gore, minors).",
@@ -20,8 +20,8 @@
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@aur/core": "workspace:*",
-    "@aur/schemas": "workspace:*"
+    "@inertial/core": "workspace:*",
+    "@inertial/schemas": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.3"

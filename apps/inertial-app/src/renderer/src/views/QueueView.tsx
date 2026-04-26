@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { AgentTrace, ReviewItem, ReviewVerdict } from "@aur/schemas";
+import type { AgentTrace, ReviewItem, ReviewVerdict } from "@inertial/schemas";
 import { commitDecision, getEventDetail, listQueue } from "../lib/api.js";
 import { cn } from "../lib/utils.js";
 import { MiniTrace, type TraceStep } from "../components/hitl/MiniTrace.js";

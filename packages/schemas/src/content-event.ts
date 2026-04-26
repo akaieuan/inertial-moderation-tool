@@ -1,8 +1,8 @@
 import { z } from "zod";
 
 /**
- * Modalities supported by the orchestrator.
- * Determines which sub-agents get dispatched for a given event.
+ * Modalities supported by the Runciter (orchestrator).
+ * Determines which inertials (sub-agents) get dispatched for a given event.
  */
 export const ModalitySchema = z.enum([
   "text",
@@ -30,7 +30,7 @@ export type Source = z.infer<typeof SourceSchema>;
 /**
  * A single piece of media attached to a content event.
  * Media is downloaded by the gateway, perceptually hashed, and stored before
- * the event hits the orchestrator. URLs here are internal pointers (S3 / blob)
+ * the event hits the Runciter. URLs here are internal pointers (S3 / blob)
  * not the original platform URL.
  */
 export const MediaAssetSchema = z.object({
@@ -81,7 +81,7 @@ export type InstanceContext = z.infer<typeof InstanceContextSchema>;
 
 /**
  * The normalized content event. Every connector emits this shape.
- * This is what the orchestrator receives.
+ * This is what the Runciter receives.
  */
 export const ContentEventSchema = z.object({
   /** Stable UUID assigned by the gateway. */
@@ -91,7 +91,7 @@ export const ContentEventSchema = z.object({
   /** Which connector emitted this. */
   source: SourceSchema,
   instance: InstanceContextSchema,
-  /** The set of modalities present. Drives orchestrator dispatch. */
+  /** The set of modalities present. Drives Runciter dispatch. */
   modalities: z.array(ModalitySchema).min(1),
   text: z.string().nullable(),
   /** Includes link previews fetched by the gateway. */

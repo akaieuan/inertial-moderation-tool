@@ -1,5 +1,13 @@
-import type { PolicyAction, StructuredSignal } from "@aur/schemas";
-import type { Condition, PolicyDoc, Rule } from "./dsl.js";
+import type { PolicyAction, StructuredSignal } from "@inertial/schemas";
+import type {
+  Condition,
+  EscalationRule,
+  PolicyDoc,
+  Rule,
+  SkillsBlock,
+} from "./dsl.js";
+
+import type { SkillMeta, SkillRegistry } from "@inertial/core";
 
 export interface EvaluationResult {
   action: PolicyAction;
@@ -24,6 +32,49 @@ export function evaluatePolicy(
     }
   }
   return { action: policy.default };
+}
+
+/** Escalation rules to fire (skill names → run) given a partial signal. */
+export function selectEscalations(
+  policy: PolicyDoc,
+  signal: StructuredSignal,
+): Array<{ rule: EscalationRule; skills: readonly string[] }> {
+  const out: Array<{ rule: EscalationRule; skills: readonly string[] }> = [];
+  for (const rule of policy.escalation) {
+    if (matches(rule.when, signal)) {
+      out.push({ rule, skills: rule.run });
+    }
+  }
+  return out;
+}
+
+/**
+ * Apply per-instance skill governance to a registry, blocking any skill
+ * that fails the policy. Mutates the registry in place. Idempotent.
+ */
+export function applySkillsPolicy(
+  registry: SkillRegistry,
+  policy: SkillsBlock,
+): void {
+  const allow = policy.allow ? new Set(policy.allow) : null;
+  for (const meta of registry.list()) {
+    const blockedByName = policy.block.includes(meta.name);
+    const blockedByExec = policy.blockExecutionModel.includes(meta.executionModel);
+    const blockedByLeak = policy.blockDataLeavingMachine && meta.dataLeavesMachine;
+    const blockedByAllowList = allow !== null && !allow.has(meta.name);
+    if (blockedByName || blockedByExec || blockedByLeak || blockedByAllowList) {
+      registry.block(meta.name);
+    }
+  }
+}
+
+/** Whether a meta would be allowed under the policy (without mutating). */
+export function isSkillAllowed(meta: SkillMeta, policy: SkillsBlock): boolean {
+  if (policy.block.includes(meta.name)) return false;
+  if (policy.blockExecutionModel.includes(meta.executionModel)) return false;
+  if (policy.blockDataLeavingMachine && meta.dataLeavesMachine) return false;
+  if (policy.allow && !policy.allow.includes(meta.name)) return false;
+  return true;
 }
 
 function matches(cond: Condition, signal: StructuredSignal): boolean {
@@ -70,7 +121,7 @@ function compare(
 
 /**
  * Convert the YAML-shaped PolicyDoc into the database-shaped `Policy` row
- * (per @aur/schemas). The DSL's structured `if` tree gets serialized as a
+ * (per @inertial/schemas). The DSL's structured `if` tree gets serialized as a
  * JSON string so the existing `Policy.rules[].expression` field can hold it
  * for audit purposes.
  */

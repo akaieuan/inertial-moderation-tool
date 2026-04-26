@@ -3,14 +3,16 @@ import type {
   ContentEvent,
   Modality,
   SignalChannel,
-} from "@aur/schemas";
-import { TraceCollector } from "./trace.js";
+} from "@inertial/schemas";
+import type { SkillContext } from "./skill.js";
 
-export interface AgentContext {
-  trace: TraceCollector;
-  signal: AbortSignal;
-  runId: string;
-}
+/**
+ * AgentContext is identical to SkillContext — agents *are* skill composers.
+ * Aliasing rather than duplicating keeps the field list authoritative in
+ * one place (skill.ts) so adding new context capabilities (e.g. budget
+ * tracker, structured logger) doesn't require touching two definitions.
+ */
+export type AgentContext = SkillContext;
 
 export interface AgentResult {
   channels: SignalChannel[];
@@ -21,6 +23,11 @@ export abstract class BaseAgent {
   abstract readonly name: string;
   abstract readonly modalities: readonly Modality[];
   abstract readonly model: string;
+
+  /** Skills this agent depends on. Optional — used for capability discovery
+   * and policy-time validation. If a listed skill is unavailable at boot the
+   * worker can refuse to start the agent rather than fail mid-event. */
+  readonly skills: readonly string[] = [];
 
   shouldRun(event: ContentEvent): boolean {
     return event.modalities.some((m) => this.modalities.includes(m));

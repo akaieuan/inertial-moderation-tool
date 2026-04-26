@@ -1,5 +1,5 @@
 import { asc, desc, eq, sql, type SQL } from "drizzle-orm";
-import { AuditEntrySchema, type AuditEntry } from "@aur/schemas";
+import { AuditEntrySchema, type AuditEntry } from "@inertial/schemas";
 import type { Database } from "../client.js";
 import type { DbExecutor } from "../executor.js";
 import { chainHash } from "../hash.js";

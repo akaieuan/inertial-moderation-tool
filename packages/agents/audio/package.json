@@ -1,5 +1,5 @@
 {
-  "name": "@aur/agents-audio",
+  "name": "@inertial/agents-audio",
   "version": "0.0.1",
   "private": true,
   "description": "Audio-modality agent. Emits transcript-derived and acoustic-derived signals.",
@@ -20,8 +20,8 @@
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@aur/core": "workspace:*",
-    "@aur/schemas": "workspace:*"
+    "@inertial/core": "workspace:*",
+    "@inertial/schemas": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.3"

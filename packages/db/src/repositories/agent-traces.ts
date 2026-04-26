@@ -1,5 +1,5 @@
 import { asc, eq } from "drizzle-orm";
-import { AgentTraceSchema, type AgentTrace } from "@aur/schemas";
+import { AgentTraceSchema, type AgentTrace } from "@inertial/schemas";
 import type { DbExecutor } from "../executor.js";
 import { agentTraces } from "../schema.js";
 import { toIso } from "../utils.js";

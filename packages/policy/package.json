@@ -1,5 +1,5 @@
 {
-  "name": "@aur/policy",
+  "name": "@inertial/policy",
   "version": "0.0.1",
   "private": true,
   "description": "YAML policy loader + evaluator. Compiles per-instance rules to predicates over StructuredSignal, emits PolicyAction.",
@@ -17,15 +17,19 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "clean": "rm -rf dist .turbo *.tsbuildinfo"
+    "clean": "rm -rf dist .turbo *.tsbuildinfo",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
-    "@aur/schemas": "workspace:*",
+    "@inertial/core": "workspace:*",
+    "@inertial/schemas": "workspace:*",
     "js-yaml": "^4.1.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
   }
 }

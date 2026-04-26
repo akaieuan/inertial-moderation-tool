@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // End-to-end smoke. POSTs a fake ContentEvent to the gateway, asserts the
-// worker dispatched the text agent and returned a StructuredSignal containing
+// runciter dispatched the text agent and returned a StructuredSignal containing
 // a high-probability spam-link-presence channel.
 //
-// Pre-req: gateway listening on :4000, worker listening on :4001.
-//   pnpm --filter @aur/worker dev
-//   pnpm --filter @aur/gateway dev
+// Pre-req: gateway listening on :4000, runciter listening on :4001.
+//   pnpm --filter @inertial/runciter dev
+//   pnpm --filter @inertial/gateway dev
 
 const GATEWAY = process.env.GATEWAY_URL ?? "http://localhost:4000";
 

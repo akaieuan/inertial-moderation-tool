@@ -9,7 +9,7 @@ import {
   MediaAssetSchema,
   ModalitySchema,
   SourceSchema,
-} from "@aur/schemas";
+} from "@inertial/schemas";
 
 const PORT = Number(process.env.PORT ?? 4000);
 const WORKER_URL = process.env.WORKER_URL ?? "http://localhost:4001";

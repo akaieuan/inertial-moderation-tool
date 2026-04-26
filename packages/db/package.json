@@ -1,5 +1,5 @@
 {
-  "name": "@aur/db",
+  "name": "@inertial/db",
   "version": "0.0.1",
   "private": true,
   "description": "Drizzle + Postgres + pgvector persistence. Stores ContentEvents, signals, traces, reviews, policies, hash-chained audit log, and embeddings for similarity search.",
@@ -18,6 +18,10 @@
     "./dev": {
       "types": "./dist/dev.d.ts",
       "default": "./dist/dev.js"
+    },
+    "./tools": {
+      "types": "./dist/tools/index.d.ts",
+      "default": "./dist/tools/index.js"
     }
   },
   "files": ["dist", "migrations", "drizzle.config.ts"],
@@ -32,7 +36,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@aur/schemas": "workspace:*",
+    "@inertial/core": "workspace:*",
+    "@inertial/schemas": "workspace:*",
     "@electric-sql/pglite": "^0.2.17",
     "drizzle-orm": "^0.40.0",
     "postgres": "^3.4.5",

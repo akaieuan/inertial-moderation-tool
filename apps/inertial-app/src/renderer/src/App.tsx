@@ -13,7 +13,7 @@ export function App() {
       <header className="border-b border-[color:var(--border)] px-6 py-4">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-light tracking-tight">aur</h1>
+            <h1 className="text-xl font-light tracking-tight">inertial</h1>
             <p className="text-xs uppercase tracking-widest text-[color:var(--muted-foreground)]">
               moderator dashboard · pre-alpha
             </p>

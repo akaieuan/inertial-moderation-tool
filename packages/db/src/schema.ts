@@ -1,5 +1,5 @@
 /**
- * Drizzle schema. Every table mirrors a `@aur/schemas` Zod contract.
+ * Drizzle schema. Every table mirrors a `@inertial/schemas` Zod contract.
  *
  * Conventions:
  *  - camelCase in TypeScript, snake_case in Postgres (Drizzle handles both).
@@ -34,10 +34,10 @@ import type {
   PolicyRule,
   SignalChannel,
   TraceStep,
-} from "@aur/schemas";
+} from "@inertial/schemas";
 
 // ---------------------------------------------------------------------------
-// Enums — kept in sync with @aur/schemas. Adding a value here requires also
+// Enums — kept in sync with @inertial/schemas. Adding a value here requires also
 // updating the corresponding Zod enum.
 // ---------------------------------------------------------------------------
 

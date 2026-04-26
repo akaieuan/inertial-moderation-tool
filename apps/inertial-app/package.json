@@ -1,8 +1,8 @@
 {
-  "name": "@aur/aur-app",
+  "name": "@inertial/app",
   "version": "0.0.1",
   "private": true,
-  "description": "Electron dashboard for human reviewers. Built on HITL-KIT primitives + @aur/registry composites.",
+  "description": "Electron dashboard for human reviewers. Built on HITL-KIT primitives + @inertial/registry composites.",
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
@@ -13,7 +13,7 @@
     "clean": "rm -rf out dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@aur/schemas": "workspace:*",
+    "@inertial/schemas": "workspace:*",
     "@eval-kit/core": "link:../../../eval-kit/packages/core",
     "@eval-kit/ui": "link:../../../eval-kit/packages/ui",
     "clsx": "^2.1.1",

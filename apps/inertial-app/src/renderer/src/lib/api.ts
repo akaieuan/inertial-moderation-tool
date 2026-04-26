@@ -4,7 +4,7 @@ import type {
   ReviewItem,
   ReviewVerdict,
   StructuredSignal,
-} from "@aur/schemas";
+} from "@inertial/schemas";
 
 const WORKER_URL =
   (import.meta.env.VITE_WORKER_URL as string | undefined) ??

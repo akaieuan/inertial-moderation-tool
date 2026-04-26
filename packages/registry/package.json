@@ -1,5 +1,5 @@
 {
-  "name": "@aur/registry",
+  "name": "@inertial/registry",
   "version": "0.0.1",
   "private": true,
   "description": "shadcn-compatible component registry. Aur-specific composites layered on top of HITL-KIT primitives.",
@@ -20,7 +20,7 @@
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@aur/schemas": "workspace:*"
+    "@inertial/schemas": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.3"

@@ -1,5 +1,5 @@
 import { and, desc, eq } from "drizzle-orm";
-import { PolicySchema, type Policy } from "@aur/schemas";
+import { PolicySchema, type Policy } from "@inertial/schemas";
 import type { DbExecutor } from "../executor.js";
 import { policies } from "../schema.js";
 import { nullToUndef, toIso } from "../utils.js";

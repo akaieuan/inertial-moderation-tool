@@ -1,5 +1,5 @@
 /**
- * @aur/schemas — the lingua franca of aur.
+ * @inertial/schemas \u2014 the lingua franca of inertial.
  *
  * Every package in this monorepo speaks Zod-validated shapes from this file.
  * Connectors emit ContentEvent. Agents emit SignalChannel + AgentTrace.

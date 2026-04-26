@@ -2,7 +2,7 @@ import type {
   ExtractedEntity,
   SignalChannel,
   StructuredSignal,
-} from "@aur/schemas";
+} from "@inertial/schemas";
 
 export interface AggregationInput {
   contentEventId: string;

@@ -1,5 +1,5 @@
-import { BaseAgent, type AgentContext } from "@aur/core";
-import type { ContentEvent, Modality, SignalChannel } from "@aur/schemas";
+import { BaseAgent, type AgentContext } from "@inertial/core";
+import type { ContentEvent, Modality, SignalChannel } from "@inertial/schemas";
 
 export class AudioAgent extends BaseAgent {
   readonly name = "audio-agent";
