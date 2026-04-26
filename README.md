@@ -141,7 +141,7 @@ Local-first is not a magic bullet. **For high-stakes content (minor detection, v
 Requires Node ≥20 and pnpm 10.
 
 ```bash
-git clone https://github.com/akaieuan/inertial inertial
+git clone https://github.com/akaieuan/inertial-moderation-tool inertial
 cd inertial
 pnpm install
 pnpm build
