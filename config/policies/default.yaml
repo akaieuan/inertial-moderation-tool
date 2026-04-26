@@ -1,0 +1,71 @@
+# Default policy. Used when no per-instance policy file matches an event's
+# instance.id. Keeps things simple for the dev demo: anything the toxicity
+# classifier flags goes to a review queue; clean events auto-allow.
+#
+# Rules evaluate in declaration order; first match wins.
+
+instance: default
+version: 1
+basedOn: standard
+
+rules:
+  - id: severe-toxicity-deep
+    description: "Severe toxicity / threat / identity-hate — deep review"
+    if:
+      any:
+        - channel: severe_toxic
+          op: gt
+          value: 0.8
+        - channel: threat
+          op: gt
+          value: 0.7
+        - channel: identity_hate
+          op: gt
+          value: 0.7
+    action:
+      kind: queue.deep
+      reason: "severe-toxicity / threat / identity-hate above threshold"
+
+  - id: toxicity-quick
+    description: "Moderate toxicity — quick review"
+    if:
+      channel: toxic
+      op: gt
+      value: 0.7
+    action:
+      kind: queue.quick
+      reason: "toxicity > 0.7"
+
+  - id: obscene-quick
+    description: "Obscene content — quick review"
+    if:
+      channel: obscene
+      op: gt
+      value: 0.7
+    action:
+      kind: queue.quick
+      reason: "obscene > 0.7"
+
+  - id: insult-quick
+    description: "Insult-class content — quick review"
+    if:
+      channel: insult
+      op: gt
+      value: 0.75
+    action:
+      kind: queue.quick
+      reason: "insult > 0.75"
+
+  - id: spam-link
+    description: "URL detected by regex agent — quick review"
+    if:
+      channel: spam-link-presence
+      op: gt
+      value: 0.6
+    action:
+      kind: queue.quick
+      reason: "spam-link-presence > 0.6"
+
+default:
+  kind: auto-allow
+  reason: "no rule matched"

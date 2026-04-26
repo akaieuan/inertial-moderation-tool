@@ -1,0 +1,45 @@
+@import "tailwindcss";
+@import "@eval-kit/ui/styles.css";
+
+:root {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --muted: #151515;
+  --muted-foreground: #8a8a8a;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --card: #0f0f0f;
+  --accent-violet: #a78bfa;
+  --accent-amber: #fbbf24;
+  --accent-emerald: #4ade80;
+  --accent-rose: #fb7185;
+  --accent-blue: #007AFF;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-card: var(--card);
+  --color-accent-violet: var(--accent-violet);
+  --color-accent-amber: var(--accent-amber);
+  --color-accent-emerald: var(--accent-emerald);
+  --color-accent-rose: var(--accent-rose);
+  --color-accent-blue: var(--accent-blue);
+}
+
+html,
+body {
+  background: var(--background);
+  color: var(--foreground);
+  color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--accent-blue);
+  color: #ffffff;
+}

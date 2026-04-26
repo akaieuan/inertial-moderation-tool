@@ -1,0 +1,30 @@
+{
+  "name": "@aur/agents-text",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Text-modality agent. Emits text-derived signals (spam, toxicity, hate, PII).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist .turbo *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@aur/core": "workspace:*",
+    "@aur/schemas": "workspace:*",
+    "@huggingface/transformers": "^3.3.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

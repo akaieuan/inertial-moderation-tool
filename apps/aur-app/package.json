@@ -1,0 +1,37 @@
+{
+  "name": "@aur/aur-app",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Electron dashboard for human reviewers. Built on HITL-KIT primitives + @aur/registry composites.",
+  "type": "module",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "clean": "rm -rf out dist .turbo *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@aur/schemas": "workspace:*",
+    "@eval-kit/core": "link:../../../eval-kit/packages/core",
+    "@eval-kit/ui": "link:../../../eval-kit/packages/ui",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.11.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^3.5.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/node": "^22.10.5",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.1",
+    "electron-vite": "^2.3.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.3",
+    "vite": "^5.4.11"
+  }
+}

@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: aur-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aur
+      POSTGRES_PASSWORD: aur
+      POSTGRES_DB: aur
+    ports:
+      - "5432:5432"
+    volumes:
+      - aur_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aur -d aur"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+volumes:
+  aur_pg_data:
