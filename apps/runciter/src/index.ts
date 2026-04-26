@@ -33,7 +33,7 @@ import {
   type SignalChannel,
   type StructuredSignal,
 } from "@inertial/schemas";
-import { audit, events, review, signals, traces } from "@inertial/db";
+import { audit, events, review, shadow, signals, traces } from "@inertial/db";
 import { createDevDatabase } from "@inertial/db/dev";
 import { makeAuthorHistoryTool } from "@inertial/db/tools";
 import {
@@ -69,7 +69,7 @@ console.log("[runciter] in-memory pglite ready");
 // 2. Policy.
 const policy = await loadPolicyFromFile(POLICY_PATH);
 console.log(
-  `[runciter] policy loaded: ${policy.instance} v${policy.version} (${policy.rules.length} rules, ${policy.escalation.length} escalations)`,
+  `[runciter] policy loaded: ${policy.instance} v${policy.version} (${policy.rules.length} rules, ${policy.escalation.length} escalations, ${policy.shadow.length} shadow skills)`,
 );
 
 // 3. Skill registry. Always register local skills; cloud skill registers
@@ -140,7 +140,7 @@ app.post("/v1/events", async (c) => {
   const event = parsed.data;
   const result = await processEvent(event);
   console.log(
-    `[runciter] ${event.id.slice(0, 8)} → ${result.action.kind} (${result.matchedRuleId ?? "default"}) escalations=${result.escalationsRun}`,
+    `[runciter] ${event.id.slice(0, 8)} → ${result.action.kind} (${result.matchedRuleId ?? "default"}) escalations=${result.escalationsRun} shadow=${result.shadowRunsCompleted}`,
   );
   return c.json(result);
 });
@@ -179,8 +179,32 @@ app.get("/v1/skills", (c) =>
       description: s.description ?? null,
     })),
     tools: tools.list(),
+    shadow: policy.shadow,
   }),
 );
+
+app.get("/v1/audit/:instance", async (c) => {
+  const instanceId = c.req.param("instance");
+  const fromSequence = c.req.query("from");
+  const limit = c.req.query("limit");
+  const entries = await audit.listAuditEntries(db, instanceId, {
+    fromSequence: fromSequence ? Number(fromSequence) : undefined,
+    limit: limit ? Number(limit) : 100,
+  });
+  return c.json({ entries });
+});
+
+app.get("/v1/audit/:instance/verify", async (c) => {
+  const instanceId = c.req.param("instance");
+  const result = await audit.verifyAuditChain(db, instanceId);
+  return c.json(result);
+});
+
+app.get("/v1/shadow/:instance/agreement", async (c) => {
+  const instanceId = c.req.param("instance");
+  const rows = await shadow.getSkillAgreement(db, instanceId);
+  return c.json({ skills: rows });
+});
 
 app.post("/v1/reviews/:id/decisions", async (c) => {
   const reviewItemId = c.req.param("id");
@@ -228,6 +252,7 @@ interface ProcessResult {
   matchedRuleId?: string;
   reviewItemId?: string;
   escalationsRun: number;
+  shadowRunsCompleted: number;
 }
 
 async function processEvent(event: ContentEvent): Promise<ProcessResult> {
@@ -304,7 +329,47 @@ async function processEvent(event: ContentEvent): Promise<ProcessResult> {
     actorId: null,
   });
 
-  // 5. Evaluate policy.
+  // 5. Shadow runs — fire-and-forget skills whose predictions never affect
+  //    the production signal or routing. Persisted as `shadow:<skill>` traces
+  //    so the agreement helper in @inertial/db can pair them with reviewer
+  //    decisions later. Failure here MUST NOT fail the event.
+  let shadowRunsCompleted = 0;
+  for (const skillName of policy.shadow) {
+    const skill = skills.get<TextClassificationInput, SignalOutput>(skillName);
+    if (!skill) {
+      console.warn(
+        `[runciter] shadow skill "${skillName}" not registered — skipping`,
+      );
+      continue;
+    }
+    try {
+      const trace = await runShadowSkill(skill, event);
+      await traces.saveAgentTrace(db, trace);
+      shadowRunsCompleted += 1;
+      const channelDecisions = trace.steps.filter((s) => s.kind === "decision");
+      await audit.appendAuditEntry(db, {
+        instanceId: event.instance.id,
+        kind: "signal-generated",
+        ref: { type: "signal", id: event.id },
+        payload: {
+          mode: "shadow",
+          skill: skillName,
+          provider: skill.meta.provider,
+          dataLeavesMachine: skill.meta.dataLeavesMachine,
+          channelsPredicted: channelDecisions.map((s) =>
+            s.kind === "decision" ? { channel: s.channel, probability: s.probability } : null,
+          ),
+        },
+        actorId: null,
+      });
+    } catch (err) {
+      console.warn(
+        `[runciter] shadow skill ${skillName} failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  // 6. Evaluate policy.
   const evaluation = evaluatePolicy(policy, signal);
   await audit.appendAuditEntry(db, {
     instanceId: event.instance.id,
@@ -317,7 +382,7 @@ async function processEvent(event: ContentEvent): Promise<ProcessResult> {
     actorId: null,
   });
 
-  // 6. Route into the queue if policy says so.
+  // 7. Route into the queue if policy says so.
   let reviewItemId: string | undefined;
   if (
     evaluation.action.kind === "queue.quick" ||
@@ -365,7 +430,44 @@ async function processEvent(event: ContentEvent): Promise<ProcessResult> {
     matchedRuleId: evaluation.matchedRuleId,
     reviewItemId,
     escalationsRun,
+    shadowRunsCompleted,
   };
+}
+
+async function runShadowSkill(
+  skill: Skill<TextClassificationInput, SignalOutput>,
+  event: ContentEvent,
+): Promise<AgentTrace> {
+  const trace = new TraceCollector();
+  const ctx = makeSkillContext({
+    trace,
+    tools,
+    skills,
+    signal: new AbortController().signal,
+    runId: event.id,
+    instanceId: event.instance.id,
+  });
+  const startedAt = new Date().toISOString();
+  trace.thought(
+    `shadow run: ${skill.meta.name} (${skill.meta.provider}, dataLeavesMachine=${skill.meta.dataLeavesMachine}) — prediction NOT used by production policy`,
+  );
+  const output = await skill.run(
+    {
+      text: event.text ?? "",
+      authorId: event.author.id,
+      instanceId: event.instance.id,
+    },
+    ctx,
+  );
+  for (const ch of output.channels) trace.decision(ch);
+  // The `shadow:` agent prefix is what the db.shadow.getSkillAgreement query
+  // looks for to distinguish silent predictions from production runs.
+  return trace.finalize({
+    agent: `shadow:${skill.meta.name}`,
+    contentEventId: event.id,
+    model: skill.meta.name,
+    startedAt,
+  });
 }
 
 async function runEscalationSkill(

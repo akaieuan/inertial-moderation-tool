@@ -120,6 +120,18 @@ export const PolicyDocSchema = z.object({
   skills: SkillsBlockSchema.default({ block: [], blockExecutionModel: [], blockDataLeavingMachine: false }),
   /** Escalation rules — run extra skills when intermediate signal matches a condition. */
   escalation: z.array(EscalationRuleSchema).default([]),
+  /**
+   * Skills that run silently on every event — their predictions never affect
+   * the production signal or routing. Used to gather paired (agent, human)
+   * data for continuous calibration: when a reviewer commits a verdict on the
+   * underlying ContentEvent, that verdict + the shadow prediction become a
+   * gold-set entry, graded by the actual operator.
+   *
+   * Skills referenced here must be registered AND not blocked by the
+   * `skills:` block. If a shadow skill isn't available at run time, the
+   * runciter logs a warning and skips it without failing the event.
+   */
+  shadow: z.array(z.string()).default([]),
   /** ISO timestamp; defaults to load time if absent in the YAML. */
   createdAt: z.string().datetime().optional(),
   createdBy: z.string().optional(),

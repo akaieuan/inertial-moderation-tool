@@ -34,6 +34,18 @@ escalation:
     run:
       - text-classify-toxicity@anthropic
 
+# Shadow runs. These skills fire on *every* event, run silently in parallel,
+# and never affect the production signal or routing. When a reviewer commits
+# a verdict on the underlying ContentEvent, the runciter pairs it with the
+# shadow prediction — every review becomes a free gold-set entry, graded by
+# the actual operator. This is what feeds @inertial/eval's continuous
+# calibration over time.
+#
+# If the named skill isn't registered (e.g. ANTHROPIC_API_KEY not set), the
+# runciter logs a warning and skips it without failing the event.
+shadow:
+  - text-classify-toxicity@anthropic
+
 # First-match policy rules over the merged signal.
 rules:
   - id: severe-toxicity-deep

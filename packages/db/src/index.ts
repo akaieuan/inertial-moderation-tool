@@ -23,3 +23,5 @@ export * as review from "./repositories/review.js";
 export * as policy from "./repositories/policies.js";
 export * as audit from "./repositories/audit.js";
 export * as embeddings from "./repositories/embeddings.js";
+export * as shadow from "./repositories/shadow.js";
+export type { SkillAgreement } from "./repositories/shadow.js";

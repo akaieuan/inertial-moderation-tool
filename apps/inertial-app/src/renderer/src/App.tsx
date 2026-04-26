@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { QueueView } from "./views/QueueView.js";
 import { EvalView } from "./views/EvalView.js";
+import { ComplianceView } from "./views/ComplianceView.js";
 import { cn } from "./lib/utils.js";
 
-type Tab = "queue" | "eval";
+type Tab = "queue" | "compliance" | "eval";
 
 export function App() {
   const [tab, setTab] = useState<Tab>("queue");
@@ -22,6 +23,12 @@ export function App() {
             <TabButton active={tab === "queue"} onClick={() => setTab("queue")}>
               Queue
             </TabButton>
+            <TabButton
+              active={tab === "compliance"}
+              onClick={() => setTab("compliance")}
+            >
+              Compliance
+            </TabButton>
             <TabButton active={tab === "eval"} onClick={() => setTab("eval")}>
               Eval
             </TabButton>
@@ -29,7 +36,13 @@ export function App() {
         </div>
       </header>
       <main className="flex-1 overflow-auto p-6">
-        {tab === "queue" ? <QueueView /> : <EvalView />}
+        {tab === "queue" ? (
+          <QueueView />
+        ) : tab === "compliance" ? (
+          <ComplianceView />
+        ) : (
+          <EvalView />
+        )}
       </main>
     </div>
   );
