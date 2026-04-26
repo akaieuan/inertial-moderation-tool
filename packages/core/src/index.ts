@@ -21,6 +21,7 @@ export {
   type SkillContext,
   type SignalOutput,
   type TextClassificationInput,
+  type ImageClassificationInput,
   type ExecutionModel,
 } from "./skill.js";
 export {

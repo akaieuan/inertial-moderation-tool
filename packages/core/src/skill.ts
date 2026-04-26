@@ -55,6 +55,19 @@ export interface TextClassificationInput {
   instanceId?: string;
 }
 
+/** Most image-classification skills accept this input shape. */
+export interface ImageClassificationInput {
+  /** Stable id of the source MediaAsset — preserved on emitted evidence pointers. */
+  mediaAssetId: string;
+  /** Internal storage URL. `file://` for local fixtures, `http(s)://` in production. */
+  url: string;
+  mimeType: string;
+  width?: number | null;
+  height?: number | null;
+  authorId?: string;
+  instanceId?: string;
+}
+
 export interface SkillContext {
   trace: TraceCollector;
   tools: ToolRegistry;

@@ -19,8 +19,10 @@ import {
   textSpamLinkSkill,
   textToxicityLocalSkill,
 } from "@inertial/agents-text";
+import { VisionAgent } from "@inertial/agents-vision";
 import {
   anthropicAvailable,
+  imageNsfwAnthropicSkill,
   textToxicityAnthropicSkill,
 } from "@inertial/agents-cloud";
 import {
@@ -81,10 +83,13 @@ const skills = new SkillRegistry()
 
 if (anthropicAvailable()) {
   skills.register(textToxicityAnthropicSkill);
-  console.log("[runciter] cloud skill registered: text-classify-toxicity@anthropic");
+  skills.register(imageNsfwAnthropicSkill);
+  console.log(
+    "[runciter] cloud skills registered: text-classify-toxicity@anthropic, image-classify@anthropic",
+  );
 } else {
   console.log(
-    "[runciter] no ANTHROPIC_API_KEY — text-classify-toxicity@anthropic NOT registered (escalations will skip it)",
+    "[runciter] no ANTHROPIC_API_KEY — cloud skills NOT registered (vision is cloud-only; image events will get no signal)",
   );
 }
 
@@ -108,14 +113,17 @@ console.log(
 );
 
 // 6. Runciter \u2014 dispatches inertials (agents) that compose skills.
+//    VisionAgent is given the cloud skill name explicitly so it composes
+//    only that. (No local image classifier ships — see CLAUDE.md "honest
+//    vision capability" section.)
 const runciter = new InMemoryRunciter({
-  agents: [new TextAgent()],
+  agents: [new TextAgent(), new VisionAgent(["image-classify@anthropic"])],
   skills,
   tools,
 });
 
-// 7. Pre-warm any expensive skill init.
-console.log("[runciter] warming skills (one-time toxic-bert download ~250MB on first run)…");
+// 7. Pre-warm any expensive skill init (toxic-bert ~250MB on first run).
+console.log("[runciter] warming skills (toxic-bert downloads on first run)…");
 await skills.warmupAll();
 console.log("[runciter] skills ready");
 

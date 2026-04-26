@@ -48,13 +48,12 @@ The pattern is the same in both worlds: an AI makes a black-box call, a human en
 And because moderators have wildly different privacy budgets, inertial lets them compose:
 
 - **Heuristics** — regex, perceptual hash matching, blocklists. Zero cost, zero data leaves the machine.
-- **Small local models** — toxicity classifiers, NER, Whisper, NSFW detectors running in-process. Total privacy, modest capability.
-- **Local server models** — richer vision-language models running on the operator's own box (via Ollama). Better quality, still local.
-- **Cloud LLMs** — Anthropic, Google, OpenAI. Opt-in per rule, with budget caps. The only tier where data leaves the machine — and it's logged when it does.
+- **Small local models — *only where they earn it***. Text toxicity classification (toxic-bert, in-process via transformers.js) is a bounded enough task that local is honest. We **do not** ship local image-NSFW, video, audio-reasoning, or cross-event classifiers — small models lie about their capability on those tasks, and false confidence on minor-detection or video understanding is worse than no signal at all.
+- **Cloud LLMs — the workhorse for non-trivial moderation.** Image (Claude Vision), eventually video (Gemini multi-frame), nuanced/coded text (Claude Sonnet), cross-event reasoning. Opt-in per rule, with budget caps. The only tier where data leaves the machine — and every call is logged.
 
 …in a single auditable pipeline. The audit log records which model saw which event, so a federated mod can prove "no remote API touched my instance over the last 30 days" — not as a promise, as a hash-chained artifact.
 
-Same toolkit, different points on the curve. A 200-user fediverse instance with no budget runs heuristics + local models only. A corporate Slack admin enables cloud agents for everything. Both flow through the same code, the same dashboard, the same review queue.
+Same toolkit, different points on the curve. A no-budget instance runs heuristics + local text-toxicity only and accepts that they don't get image moderation; a funded operator enables cloud skills and gets full coverage. Both flow through the same code, the same dashboard, the same review queue. **The architecture refuses to lie about local capability** — there is no "fake" local image classifier that pretends to do what only a frontier model can.
 
 ---
 

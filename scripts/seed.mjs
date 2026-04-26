@@ -1,16 +1,37 @@
 #!/usr/bin/env node
-// Seed the worker with 10 hand-crafted events covering each policy bucket.
-// Posts through the gateway (which forwards to the worker), then prints
+// Seed the runciter with hand-crafted events covering each policy bucket.
+// Posts through the gateway (which forwards to the runciter), then prints
 // the resulting queue.
 //
-// Pre-req: gateway on :4000 + worker on :4001 (and worker has finished
-// its toxicity-model warmup, which is what gates /healthz).
+// Pre-req: gateway on :4000 + runciter on :4001 (and runciter has finished
+// its model warmups, which is what gates /healthz).
+//
+// Image events use stable Lorem Picsum URLs so this script works without
+// committing fixture binaries. To run fully offline, swap the URLs for
+// `file://` paths to local images.
 
 import { randomUUID } from "node:crypto";
 
 const GATEWAY = process.env.GATEWAY_URL ?? "http://localhost:4000";
 const WORKER = process.env.WORKER_URL ?? "http://localhost:4001";
 const INSTANCE = "smoke.local";
+
+const FIXTURE_CAT = "https://picsum.photos/seed/inertial-cat/320/240";
+const FIXTURE_LANDSCAPE = "https://picsum.photos/seed/inertial-landscape/320/240";
+const FIXTURE_DOCUMENT = "https://picsum.photos/seed/inertial-document/320/240";
+
+function imageMedia(url, width = 320, height = 240) {
+  return {
+    id: randomUUID(),
+    modality: "image",
+    url,
+    perceptualHash: null,
+    mimeType: "image/jpeg",
+    bytes: 0,
+    width,
+    height,
+  };
+}
 
 /**
  * Each entry: a short label + the text payload + the expected policy outcome
@@ -70,30 +91,54 @@ const SAMPLES = [
     text: "",
     expect: "auto-allow",
   },
+  {
+    label: "11 image-only post (cat)",
+    text: null,
+    modalities: ["image"],
+    media: [imageMedia(FIXTURE_CAT)],
+    expect: "auto-allow (benign fixture)",
+  },
+  {
+    label: "12 image + clean text (landscape)",
+    text: "morning hike, beautiful view",
+    modalities: ["text", "image"],
+    media: [imageMedia(FIXTURE_LANDSCAPE)],
+    expect: "auto-allow (benign fixture)",
+  },
+  {
+    label: "13 image + toxic text (document)",
+    text: "you're a moron and this paper is garbage",
+    modalities: ["text", "image"],
+    media: [imageMedia(FIXTURE_DOCUMENT)],
+    expect: "queue.quick (text triggers toxicity rule, image is benign)",
+  },
 ];
 
-function makeEvent(text, override = {}) {
+function makeEvent(sample) {
   const now = new Date().toISOString();
+  const text = sample.text;
+  const modalities = sample.modalities ?? ["text"];
   return {
     id: randomUUID(),
     sourceId: `seed-${Math.random().toString(36).slice(2, 10)}`,
     source: "test",
     instance: { id: INSTANCE, source: "test" },
-    modalities: ["text"],
+    modalities,
     text: text === "" ? null : text,
     links: [],
-    media: [],
+    media: sample.media ?? [],
     hasContentWarning: false,
-    author: { id: "seeder", handle: "seeder", priorActionCount: 0 },
+    author: sample.author ?? {
+      id: "seeder",
+      handle: "seeder",
+      priorActionCount: 0,
+    },
     postedAt: now,
     ingestedAt: now,
-    ...override,
-    // modalities must be non-empty even when text is null
-    ...(text === "" ? { modalities: ["text"] } : {}),
   };
 }
 
-async function waitForHealth(label, url, timeoutMs = 60_000) {
+async function waitForHealth(label, url, timeoutMs = 120_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -109,14 +154,14 @@ async function waitForHealth(label, url, timeoutMs = 60_000) {
 }
 
 async function main() {
-  await waitForHealth("worker", WORKER);
+  await waitForHealth("runciter", WORKER);
   await waitForHealth("gateway", GATEWAY);
 
   console.log(`\n[seed] posting ${SAMPLES.length} events to ${GATEWAY}/v1/events …\n`);
   const padLabel = Math.max(...SAMPLES.map((s) => s.label.length));
 
   for (const sample of SAMPLES) {
-    const event = makeEvent(sample.text, sample.author ? { author: sample.author } : {});
+    const event = makeEvent(sample);
     const res = await fetch(`${GATEWAY}/v1/events`, {
       method: "POST",
       headers: { "content-type": "application/json" },

@@ -48,6 +48,16 @@ shadow:
 
 # First-match policy rules over the merged signal.
 rules:
+  - id: nsfw-deep
+    description: "Local NSFW classifier above threshold → deep review"
+    if:
+      channel: image_nsfw
+      op: gt
+      value: 0.7
+    action:
+      kind: queue.deep
+      reason: "image_nsfw > 0.7"
+
   - id: severe-toxicity-deep
     description: "Severe toxicity / threat / identity-hate → deep review"
     if:
