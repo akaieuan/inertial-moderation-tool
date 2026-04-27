@@ -57,10 +57,25 @@ export const EvidencePointerSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("similarity-cluster"),
-    /** ContentEvent IDs that ContextAgent grouped with this one. */
-    relatedEventIds: z.array(z.string().uuid()),
-    /** Cosine similarity score in [0, 1]. */
+    /** Top neighbours from the same instance, ranked by similarity desc. */
+    neighbors: z.array(
+      z.object({
+        contentEventId: z.string().uuid(),
+        /** Cosine similarity in [-1, 1]. 1.0 = identical direction. */
+        similarity: z.number().min(-1).max(1),
+      }),
+    ),
+    /** Aggregate score — typically the top neighbour's similarity. In [0, 1]. */
     score: z.number().min(0).max(1),
+  }),
+  z.object({
+    kind: z.literal("author-history"),
+    /** Stable Author.id whose history this evidence summarizes. */
+    authorId: z.string(),
+    /** Most-recent first ContentEvent IDs from this author on the same instance. */
+    recentEventIds: z.array(z.string().uuid()),
+    /** Cumulative count of moderation actions on this author's prior content. */
+    priorActionCount: z.number().int().nonnegative(),
   }),
 ]);
 export type EvidencePointer = z.infer<typeof EvidencePointerSchema>;

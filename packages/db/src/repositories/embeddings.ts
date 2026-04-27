@@ -1,8 +1,27 @@
-import { cosineDistance, desc, eq, gt, sql } from "drizzle-orm";
+import { and, cosineDistance, desc, eq, gt, sql } from "drizzle-orm";
 import type { DbExecutor } from "../executor.js";
 import { embeddingKindEnum, eventEmbeddings } from "../schema.js";
 
 export type EmbeddingKind = (typeof embeddingKindEnum.enumValues)[number];
+
+/** Fetch the persisted embedding for one (event, kind) pair. Null when absent. */
+export async function getEmbeddingForEvent(
+  db: DbExecutor,
+  contentEventId: string,
+  kind: EmbeddingKind,
+): Promise<number[] | null> {
+  const rows = await db
+    .select({ embedding: eventEmbeddings.embedding })
+    .from(eventEmbeddings)
+    .where(
+      and(
+        eq(eventEmbeddings.contentEventId, contentEventId),
+        eq(eventEmbeddings.kind, kind),
+      ),
+    )
+    .limit(1);
+  return rows[0]?.embedding ?? null;
+}
 
 export interface SaveEmbeddingInput {
   contentEventId: string;

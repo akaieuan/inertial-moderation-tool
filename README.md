@@ -8,7 +8,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue.svg)](#)
 [![Status](https://img.shields.io/badge/status-pre--alpha-red.svg)](#)
 
-> **Status — pre-alpha (month 1 of 3).** The kernel is real and tested. The agent and connector roster is sparse. APIs will change.
+> **Status — pre-alpha.** The kernel is real and tested. The agent and connector roster is sparse. APIs will change.
 
 `inertial` is two things in one monorepo:
 
@@ -408,26 +408,26 @@ Conditions form a tree: leaf (`channel + op + value` or `entity + present`), `al
 
 ---
 
-## Where we are in the build (month 1 of 3)
+## Roadmap
 
-Pre-alpha. The kernel is real; the agent + connector roster is sparse on purpose. The roadmap is split into pillars so you can tell what's load-bearing today vs. what's in flight.
+The kernel is real; the agent + connector roster is sparse on purpose. The roadmap is split into pillars so you can tell what's load-bearing today vs. what's in flight.
 
-### Done — month 1
+### Shipped
 
 | Pillar | What landed | Why it matters |
 |---|---|---|
-| **Pillar 0** — Foundations | `@inertial/schemas` (8 Zod contracts), `@inertial/core` (Runciter, BaseAgent, max-confidence aggregator), gateway + runciter shells, end-to-end smoke | Every cross-package shape is a typed Zod schema. The runciter dispatches inertials; humans decide. |
-| **Pillar 1** — Persistence + audit | `@inertial/db` (Drizzle + Postgres + pgvector), 8 tables, **hash-chained audit log with tamper detection**, pglite dev factory, 41 hermetic integration tests | "No remote API touched my instance over the last 30 days" becomes a hash-chained artifact, not a promise. |
-| **Pillar 2** — Live moderation pipeline | Real `text-toxicity-local` (`Xenova/toxic-bert` via transformers.js, ~50ms/event after warmup), `@inertial/policy` YAML evaluator, DB-persisted pipeline, dashboard reading live data, decision commit flow | Seed 10 events → see them route to queues → approve/remove from the dashboard → audit log grows. |
-| **Pillar 3** — Vision + split-pane review UX | Claude Vision moderation (`image-classify@anthropic`), split-pane queue → detail layout, evidence rendering with bbox overlays | Image flags get the same audit + reviewer treatment as text. |
-| **Pillar 4** — Shadow runs + compliance dashboard | Skills can run as `shadow:` peers; their decisions are recorded silently. Compliance tab surfaces per-skill agreement vs. the human reviewer. | Free continuous gold-set generation. Calibration data flows back into the eval harness. |
-| **Reviewer experience overhaul** *(this PR)* | Dashboard FlagMap heatmap with hover stats, three-deck queue layout with inline review session, Pipelines visual canvas, Skills create sheet, Insights rebuilt on internal primitives, side panels (Chat / Notes / Agent activity) docked edge-to-edge | The dashboard now reads as one app instead of seven loosely related views. See [`docs/screenshots/`](docs/screenshots/). |
+| **Foundations** | `@inertial/schemas` (8 Zod contracts), `@inertial/core` (Runciter, BaseAgent, max-confidence aggregator), gateway + runciter shells, end-to-end smoke | Every cross-package shape is a typed Zod schema. The runciter dispatches inertials; humans decide. |
+| **Persistence + audit** | `@inertial/db` (Drizzle + Postgres + pgvector), 8 tables, **hash-chained audit log with tamper detection**, pglite dev factory, 41 hermetic integration tests | "No remote API touched my instance over the last 30 days" becomes a hash-chained artifact, not a promise. |
+| **Live moderation pipeline** | Real `text-toxicity-local` (`Xenova/toxic-bert` via transformers.js, ~50ms/event after warmup), `@inertial/policy` YAML evaluator, DB-persisted pipeline, dashboard reading live data, decision commit flow | Seed 10 events → see them route to queues → approve/remove from the dashboard → audit log grows. |
+| **Vision + split-pane review** | Claude Vision moderation (`image-classify@anthropic`), split-pane queue → detail layout, evidence rendering with bbox overlays | Image flags get the same audit + reviewer treatment as text. |
+| **Shadow runs + compliance** | Skills can run as `shadow:` peers; their decisions are recorded silently. Compliance tab surfaces per-skill agreement vs. the human reviewer. | Free continuous gold-set generation. Calibration data flows back into the eval harness. |
+| **Reviewer experience** | Dashboard FlagMap heatmap with hover stats, three-deck queue layout with inline review session, Pipelines visual canvas, Skills create sheet, Insights rebuilt on internal primitives, side panels (Chat / Notes / Agent activity) docked edge-to-edge | The dashboard reads as one app instead of seven loosely related views. See [`docs/screenshots/`](docs/screenshots/). |
 
-### Next — months 2 & 3
+### In flight
 
-- **Pillar 5 — Skills + tools layer.** Refactor inertials to compose reusable skills (`classify-toxicity`, `extract-pii`, `lookup-author-history`). Tool registry backed by `@inertial/db` (author lookup, similarity search, phash query). Per-instance skill allow/block lists.
-- **Pillar 6 — Context engine.** Drops out of the tools layer — pgvector similarity search + author history queries powered by `@inertial/db`.
-- **Real inertials.** `vision-ollama` (LLaVA / qwen2.5-vl), `audio-whisper-local`, `phash-similarity`, expanded `@inertial/agents-cloud` (OpenAI, Gemini).
+- **Skills + tools layer.** Refactor inertials to compose reusable skills (`classify-toxicity`, `extract-pii`, `lookup-author-history`). Tool registry backed by `@inertial/db` (author lookup, similarity search, phash query). Per-instance skill allow/block lists.
+- **Context engine.** Drops out of the tools layer — pgvector similarity search + author history queries powered by `@inertial/db`.
+- **More inertials.** `vision-ollama` (LLaVA / qwen2.5-vl), `audio-whisper-local`, `phash-similarity`, expanded `@inertial/agents-cloud` (OpenAI, Gemini).
 - **Pipeline stages with budgets.** Per-modality cost caps, confidence-based escalation: cheap triage inertials short-circuit when confident; only the ambiguous middle goes to cloud.
 - **Real connectors.** ActivityPub / AT Protocol firehose subscribers.
 - **Eval harness.** Wire `@inertial/eval` into `@eval-kit/core`. Per-inertial calibration tracking (Brier, ECE) feeding the Insights tab live.

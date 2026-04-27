@@ -114,6 +114,8 @@ function summarizeEvidence(ev: SignalChannel["evidence"][number]): string {
     case "audio-segment":
       return `audio-segment ${ev.mediaAssetId.slice(0, 8)} ${ev.startSec}s–${ev.endSec}s`;
     case "similarity-cluster":
-      return `similarity-cluster score=${ev.score.toFixed(2)} (${ev.relatedEventIds.length} related)`;
+      return `similarity-cluster score=${ev.score.toFixed(2)} (${ev.neighbors.length} neighbours)`;
+    case "author-history":
+      return `author-history ${ev.authorId.slice(0, 8)} (${ev.recentEventIds.length} prior, ${ev.priorActionCount} actions)`;
   }
 }

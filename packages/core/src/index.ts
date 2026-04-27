@@ -32,3 +32,9 @@ export {
   type ToolKind,
 } from "./tool.js";
 export { makeSkillContext, type MakeSkillContextOptions } from "./context.js";
+export {
+  SKILL_CATALOG,
+  findCatalogEntry,
+  type SkillCatalogEntry,
+  type SkillCatalogConfigField,
+} from "./skill-catalog.js";

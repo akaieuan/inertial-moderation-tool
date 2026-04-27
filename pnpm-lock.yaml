@@ -130,6 +130,9 @@ importers:
       '@inertial/agents-cloud':
         specifier: workspace:*
         version: link:../../packages/agents/cloud
+      '@inertial/agents-context':
+        specifier: workspace:*
+        version: link:../../packages/agents/context
       '@inertial/agents-text':
         specifier: workspace:*
         version: link:../../packages/agents/text
@@ -203,6 +206,9 @@ importers:
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.17)(lightningcss@1.32.0)
 
   packages/agents/identity:
     dependencies:

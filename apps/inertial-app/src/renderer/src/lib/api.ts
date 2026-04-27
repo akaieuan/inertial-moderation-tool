@@ -4,6 +4,7 @@ import type {
   ContentEvent,
   ReviewItem,
   ReviewVerdict,
+  SkillRegistration,
   StructuredSignal,
 } from "@inertial/schemas";
 import { isDemoModeActive } from "./demo-mode.js";
@@ -13,8 +14,40 @@ import {
   getDemoEventDetail,
   getDemoQueue,
   getDemoShadowAgreement,
+  getDemoSkillCatalog,
+  getDemoSkillRegistrations,
   getDemoSkills,
 } from "./demo-data.js";
+
+// Mirror of @inertial/core's SkillCatalogEntry shape so the renderer doesn't
+// need to import @inertial/core (and pull in its server-side dependencies).
+export type SkillExecutionModel = "in-process" | "local-server" | "remote-api";
+
+export interface SkillCatalogConfigField {
+  key: string;
+  label: string;
+  type: "secret" | "text" | "select";
+  options?: readonly string[];
+  required: boolean;
+  placeholder?: string;
+  description?: string;
+}
+
+export interface SkillCatalogEntry {
+  catalogId: string;
+  family: string;
+  displayName: string;
+  provider: string;
+  executionModel: SkillExecutionModel;
+  dataLeavesMachine: boolean;
+  costEstimateUsd: number;
+  description: string;
+  configFields: readonly SkillCatalogConfigField[];
+  envVarHint?: string;
+  defaultEnabled: boolean;
+}
+
+export type { SkillRegistration };
 
 /** Mirrored from @inertial/db's `SkillAgreement` to avoid pulling pglite into the renderer bundle. */
 export interface SkillAgreement {
@@ -40,10 +73,28 @@ export async function listQueue(instanceId: string): Promise<ReviewItem[]> {
   return body.items;
 }
 
+/** Author moderation history surfaced inline in the queue detail panel. */
+export interface AuthorHistorySummary {
+  count: number;
+  totalPriorActions: number;
+  recent: Array<{ id: string; postedAt: string; excerpt: string }>;
+}
+
+/** Top-K nearest neighbours for the open event, with quick-render snippets. */
+export interface SimilarEventSummary {
+  contentEventId: string;
+  similarity: number;
+  excerpt: string;
+  authorHandle: string;
+}
+
 export interface EventDetail {
   event: ContentEvent;
   signal: StructuredSignal | null;
   traces: AgentTrace[];
+  /** Optional — populated by the runciter; absent in demo mode unless wired. */
+  authorHistory?: AuthorHistorySummary;
+  similarEvents?: SimilarEventSummary[];
 }
 
 export async function getEventDetail(eventId: string): Promise<EventDetail> {
@@ -178,4 +229,97 @@ export async function checkRunciterHealth(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// --- Skill catalog + registrations ----------------------------------------
+
+export async function getSkillCatalog(): Promise<SkillCatalogEntry[]> {
+  if (isDemoModeActive()) return getDemoSkillCatalog();
+  const res = await fetch(`${WORKER_URL}/v1/skills/catalog`);
+  if (!res.ok) throw new Error(`getSkillCatalog failed: ${res.status}`);
+  const body = (await res.json()) as { catalog: SkillCatalogEntry[] };
+  return body.catalog;
+}
+
+export async function listSkillRegistrations(
+  instanceId: string,
+): Promise<SkillRegistration[]> {
+  if (isDemoModeActive()) return getDemoSkillRegistrations();
+  const res = await fetch(
+    `${WORKER_URL}/v1/skills/registrations?instance=${encodeURIComponent(instanceId)}`,
+  );
+  if (!res.ok) throw new Error(`listSkillRegistrations failed: ${res.status}`);
+  const body = (await res.json()) as { registrations: SkillRegistration[] };
+  return body.registrations;
+}
+
+export interface AddSkillRegistrationInput {
+  instanceId: string;
+  catalogId: string;
+  displayName: string;
+  providerConfig: Record<string, unknown>;
+  enabled: boolean;
+  createdBy: string | null;
+}
+
+export async function addSkillRegistration(
+  input: AddSkillRegistrationInput,
+): Promise<SkillRegistration> {
+  if (isDemoModeActive()) {
+    // Demo: synthesize a registration for optimistic UI.
+    return {
+      id: crypto.randomUUID(),
+      ...input,
+      createdAt: new Date().toISOString(),
+    };
+  }
+  const res = await fetch(`${WORKER_URL}/v1/skills/registrations`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`addSkillRegistration failed: ${res.status} ${text}`);
+  }
+  const body = (await res.json()) as { registration: SkillRegistration };
+  return body.registration;
+}
+
+export async function toggleSkillRegistration(
+  id: string,
+  enabled: boolean,
+): Promise<SkillRegistration> {
+  if (isDemoModeActive()) {
+    // Caller is expected to mirror in local state.
+    return {
+      id,
+      instanceId: "default",
+      catalogId: "demo",
+      displayName: "demo",
+      providerConfig: {},
+      enabled,
+      createdAt: new Date().toISOString(),
+      createdBy: null,
+    };
+  }
+  const res = await fetch(`${WORKER_URL}/v1/skills/registrations/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`toggleSkillRegistration failed: ${res.status} ${text}`);
+  }
+  const body = (await res.json()) as { registration: SkillRegistration };
+  return body.registration;
+}
+
+export async function deleteSkillRegistration(id: string): Promise<void> {
+  if (isDemoModeActive()) return;
+  const res = await fetch(`${WORKER_URL}/v1/skills/registrations/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`deleteSkillRegistration failed: ${res.status}`);
 }

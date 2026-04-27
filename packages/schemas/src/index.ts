@@ -17,3 +17,4 @@ export * from "./agent-trace.js";
 export * from "./policy.js";
 export * from "./review.js";
 export * from "./audit.js";
+export * from "./skill-registration.js";

@@ -36,16 +36,13 @@ Score conservatively — most ordinary images should score low. A picture of a s
 Respond with JSON only, exactly this shape:
 {"image_nsfw": 0.0, "image_violence": 0.0, "image_minor_present": 0.0, "image_self_harm": 0.0, "rationale": "brief reasoning, ≤ 30 words"}`;
 
-let client: Anthropic | null = null;
-
-function getClient(apiKey: string): Anthropic {
-  if (!client) client = new Anthropic({ apiKey });
-  return client;
-}
-
 function isApiKeyAvailable(): string | null {
   const key = process.env.ANTHROPIC_API_KEY;
   return key && key.length > 0 ? key : null;
+}
+
+export interface AnthropicImageSkillConfig {
+  apiKey: string;
 }
 
 interface Base64Source {
@@ -82,23 +79,130 @@ async function buildImageSource(
 }
 
 /**
+ * Factory: image-NSFW classifier bound to a specific Anthropic API key. Each
+ * factory call creates a fresh Anthropic client — no shared mutable state.
+ */
+export function makeAnthropicImageNsfwSkill(
+  config: AnthropicImageSkillConfig,
+): Skill<ImageClassificationInput, SignalOutput> {
+  if (!config.apiKey) {
+    throw new Error("makeAnthropicImageNsfwSkill: apiKey is required");
+  }
+  const client = new Anthropic({ apiKey: config.apiKey });
+
+  return {
+    meta: {
+      name: "image-classify@anthropic",
+      version: "0.1.0",
+      provider: "anthropic",
+      executionModel: "remote-api",
+      dataLeavesMachine: true,
+      costEstimateUsd: 0.012,
+      avgLatencyMs: 2500,
+      description: "Claude Vision multi-category image moderation classifier",
+    },
+
+    async run(
+      input: ImageClassificationInput,
+      ctx: SkillContext,
+    ): Promise<SignalOutput> {
+      const start = Date.now();
+      const source = await buildImageSource(input);
+      const response = await client.messages.create({
+        model: MODEL_ID,
+        max_tokens: 256,
+        system: SYSTEM_PROMPT,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "image",
+                source: {
+                  type: "base64",
+                  // The Anthropic SDK types `media_type` as a closed union of
+                  // image/jpeg|png|gif|webp; we cast at the boundary because
+                  // the upstream content-type may legitimately be any of them.
+                  media_type: source.mediaType as "image/jpeg",
+                  data: source.data,
+                },
+              },
+              { type: "text", text: "Classify this image." },
+            ],
+          },
+        ],
+      });
+      const latencyMs = Date.now() - start;
+
+      const block = response.content[0];
+      if (!block || block.type !== "text") {
+        ctx.trace.error("anthropic returned no text content block", true);
+        return { channels: [] };
+      }
+
+      let parsed: Record<string, unknown>;
+      try {
+        const cleaned = block.text.trim().replace(/^```(?:json)?\s*|\s*```$/g, "");
+        parsed = JSON.parse(cleaned);
+      } catch (err) {
+        ctx.trace.error(
+          `failed to parse anthropic JSON: ${err instanceof Error ? err.message : String(err)}`,
+          true,
+        );
+        return { channels: [] };
+      }
+
+      const rationale =
+        typeof parsed["rationale"] === "string" ? (parsed["rationale"] as string) : "";
+
+      const channels: SignalChannel[] = [];
+      for (const channel of CHANNELS) {
+        const raw = parsed[channel];
+        const score = typeof raw === "number" && raw >= 0 && raw <= 1 ? raw : 0;
+        if (score < MIN_PROBABILITY) continue;
+        channels.push({
+          channel,
+          probability: score,
+          emittedBy: "image-classify@anthropic",
+          confidence: SELF_CONFIDENCE,
+          evidence: [
+            {
+              kind: "image-region",
+              mediaAssetId: input.mediaAssetId,
+              bbox: { x: 0, y: 0, w: 1, h: 1 },
+              label: channel,
+            },
+          ],
+          notes: rationale
+            ? `${channel}: ${score.toFixed(3)} — ${rationale}`
+            : `${channel}: ${score.toFixed(3)}`,
+        });
+      }
+
+      ctx.trace.thought(
+        `claude vision returned in ${latencyMs}ms: ${channels.length} channel(s) above ${MIN_PROBABILITY}`,
+      );
+      return { channels };
+    },
+  };
+}
+
+/**
+ * Default skill bound to `process.env.ANTHROPIC_API_KEY`. Lazily resolves the
+ * key — importing this module never throws when the env var is absent.
+ *
  * Cloud vision moderation. Calls Claude with a single image plus a
  * deterministic JSON-only system prompt; emits up to four signal channels
  * (nsfw, violence, minor_present, self_harm). Whole-image evidence —
- * Claude doesn't return bboxes, so the bbox is `{0,0,1,1}` and a future
- * detector-style skill would refine it.
+ * Claude doesn't return bboxes, so the bbox is `{0,0,1,1}`.
  *
  * Privacy posture: dataLeavesMachine = TRUE. The image bytes are sent to
- * Anthropic over HTTPS. Federated operators who can't tolerate this should
- * not enable the skill (or simply not install @inertial/agents-cloud).
+ * Anthropic over HTTPS.
  *
- * Cost (approx, per image at typical sizes): $0.005–$0.02. Configure budgets
- * in policy.
+ * Cost (approx, per image at typical sizes): $0.005–$0.02.
  */
-export const imageNsfwAnthropicSkill: Skill<
-  ImageClassificationInput,
-  SignalOutput
-> = {
+let envSkillCache: Skill<ImageClassificationInput, SignalOutput> | null = null;
+export const imageNsfwAnthropicSkill: Skill<ImageClassificationInput, SignalOutput> = {
   meta: {
     name: "image-classify@anthropic",
     version: "0.1.0",
@@ -109,98 +213,18 @@ export const imageNsfwAnthropicSkill: Skill<
     avgLatencyMs: 2500,
     description: "Claude Vision multi-category image moderation classifier",
   },
-
-  async run(
-    input: ImageClassificationInput,
-    ctx: SkillContext,
-  ): Promise<SignalOutput> {
-    const apiKey = isApiKeyAvailable();
-    if (!apiKey) {
-      ctx.trace.error(
-        "ANTHROPIC_API_KEY not set — image-classify@anthropic skipped",
-        true,
-      );
-      return { channels: [] };
+  async run(input, ctx) {
+    if (!envSkillCache) {
+      const key = isApiKeyAvailable();
+      if (!key) {
+        ctx.trace.error(
+          "ANTHROPIC_API_KEY not set — image-classify@anthropic skipped",
+          true,
+        );
+        return { channels: [] };
+      }
+      envSkillCache = makeAnthropicImageNsfwSkill({ apiKey: key });
     }
-
-    const start = Date.now();
-    const source = await buildImageSource(input);
-    const response = await getClient(apiKey).messages.create({
-      model: MODEL_ID,
-      max_tokens: 256,
-      system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "image",
-              source: {
-                type: "base64",
-                // The Anthropic SDK types `media_type` as a closed union of
-                // image/jpeg|png|gif|webp; we cast at the boundary because
-                // the upstream content-type may legitimately be any of them.
-                media_type: source.mediaType as "image/jpeg",
-                data: source.data,
-              },
-            },
-            { type: "text", text: "Classify this image." },
-          ],
-        },
-      ],
-    });
-    const latencyMs = Date.now() - start;
-
-    const block = response.content[0];
-    if (!block || block.type !== "text") {
-      ctx.trace.error("anthropic returned no text content block", true);
-      return { channels: [] };
-    }
-
-    let parsed: Record<string, unknown>;
-    try {
-      const cleaned = block.text.trim().replace(/^```(?:json)?\s*|\s*```$/g, "");
-      parsed = JSON.parse(cleaned);
-    } catch (err) {
-      ctx.trace.error(
-        `failed to parse anthropic JSON: ${err instanceof Error ? err.message : String(err)}`,
-        true,
-      );
-      return { channels: [] };
-    }
-
-    const rationale =
-      typeof parsed["rationale"] === "string"
-        ? (parsed["rationale"] as string)
-        : "";
-
-    const channels: SignalChannel[] = [];
-    for (const channel of CHANNELS) {
-      const raw = parsed[channel];
-      const score = typeof raw === "number" && raw >= 0 && raw <= 1 ? raw : 0;
-      if (score < MIN_PROBABILITY) continue;
-      channels.push({
-        channel,
-        probability: score,
-        emittedBy: "image-classify@anthropic",
-        confidence: SELF_CONFIDENCE,
-        evidence: [
-          {
-            kind: "image-region",
-            mediaAssetId: input.mediaAssetId,
-            bbox: { x: 0, y: 0, w: 1, h: 1 },
-            label: channel,
-          },
-        ],
-        notes: rationale
-          ? `${channel}: ${score.toFixed(3)} — ${rationale}`
-          : `${channel}: ${score.toFixed(3)}`,
-      });
-    }
-
-    ctx.trace.thought(
-      `claude vision returned in ${latencyMs}ms: ${channels.length} channel(s) above ${MIN_PROBABILITY}`,
-    );
-    return { channels };
+    return envSkillCache.run(input, ctx);
   },
 };

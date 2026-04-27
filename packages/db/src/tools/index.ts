@@ -11,3 +11,14 @@ export {
   type AuthorHistoryInput,
   type AuthorHistoryOutput,
 } from "./author-history.js";
+export {
+  makeFindSimilarEventsTool,
+  type FindSimilarInput,
+  type FindSimilarOutput,
+} from "./find-similar.js";
+export {
+  makeGetEmbeddingTool,
+  type GetEmbeddingInput,
+  type GetEmbeddingOutput,
+  type GetEmbeddingKind,
+} from "./get-embedding.js";

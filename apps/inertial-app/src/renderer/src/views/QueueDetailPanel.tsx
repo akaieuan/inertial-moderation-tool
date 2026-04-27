@@ -227,6 +227,14 @@ function DetailBody({ detail }: { detail: EventDetail }) {
         </div>
       )}
 
+      {detail.authorHistory && detail.authorHistory.recent.length > 0 && (
+        <AuthorHistorySection history={detail.authorHistory} />
+      )}
+
+      {detail.similarEvents && detail.similarEvents.length > 0 && (
+        <SimilarEventsSection neighbors={detail.similarEvents} />
+      )}
+
       <div>
         <SectionLabel>Event metadata</SectionLabel>
         <dl className="mt-2 grid grid-cols-[8rem_1fr] gap-x-3 gap-y-1.5 text-xs">
@@ -325,6 +333,92 @@ function buildOverlayMap(signal: StructuredSignal | null): Map<string, BboxOverl
     }
   }
   return map;
+}
+
+function AuthorHistorySection({
+  history,
+}: {
+  history: NonNullable<EventDetail["authorHistory"]>;
+}) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between">
+        <SectionLabel>Author history</SectionLabel>
+        <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+          {history.count} prior · {history.totalPriorActions} action
+          {history.totalPriorActions === 1 ? "" : "s"}
+        </span>
+      </div>
+      <ul className="mt-2 flex flex-col gap-2">
+        {history.recent.map((e) => (
+          <li
+            key={e.id}
+            className="rounded-md border border-border bg-card/40 px-3 py-2"
+          >
+            <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+              <span className="font-mono">{e.id.slice(0, 8)}</span>
+              <RelativeTime iso={e.postedAt} className="tabular-nums" />
+            </div>
+            <p className="mt-1 line-clamp-2 text-[12px] leading-snug text-foreground">
+              {e.excerpt || "(media post)"}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function SimilarEventsSection({
+  neighbors,
+}: {
+  neighbors: NonNullable<EventDetail["similarEvents"]>;
+}) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between">
+        <SectionLabel>Similar events</SectionLabel>
+        <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+          top {neighbors.length}
+        </span>
+      </div>
+      <ul className="mt-2 flex flex-col gap-2">
+        {neighbors.map((n) => (
+          <li
+            key={n.contentEventId}
+            className="rounded-md border border-border bg-card/40 px-3 py-2"
+          >
+            <div className="flex items-center justify-between gap-2 text-[11px]">
+              <span className="font-mono text-muted-foreground">
+                @{n.authorHandle || n.contentEventId.slice(0, 8)}
+              </span>
+              <SimilarityBar similarity={n.similarity} />
+            </div>
+            <p className="mt-1 line-clamp-2 text-[12px] leading-snug text-foreground">
+              {n.excerpt || "(media post)"}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function SimilarityBar({ similarity }: { similarity: number }) {
+  const pct = Math.max(0, Math.min(100, similarity * 100));
+  return (
+    <div className="flex items-center gap-1.5">
+      <div className="h-1 w-16 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full bg-[color:var(--accent-violet)]/80"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className="font-mono tabular-nums text-muted-foreground">
+        {similarity.toFixed(2)}
+      </span>
+    </div>
+  );
 }
 
 function traceToSteps(trace: AgentTrace): TraceStep[] {

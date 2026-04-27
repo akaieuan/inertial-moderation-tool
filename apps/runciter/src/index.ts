@@ -10,6 +10,8 @@ import {
   ToolRegistry,
   TraceCollector,
   makeSkillContext,
+  SKILL_CATALOG,
+  findCatalogEntry,
   type Skill,
   type SignalOutput,
   type TextClassificationInput,
@@ -24,26 +26,55 @@ import {
   anthropicAvailable,
   imageNsfwAnthropicSkill,
   textToxicityAnthropicSkill,
+  textEmbedVoyageSkill,
+  voyageAvailable,
+  type TextEmbedInput,
+  type TextEmbedOutput,
 } from "@inertial/agents-cloud";
+import {
+  ContextAgent,
+  textContextAuthorSkill,
+  textContextSimilarSkill,
+} from "@inertial/agents-context";
 import {
   ContentEventSchema,
   ReviewDecisionSchema,
+  SkillRegistrationSchema,
   type AgentTrace,
   type ContentEvent,
   type PolicyAction,
   type ReviewItem,
   type SignalChannel,
+  type SkillRegistration,
   type StructuredSignal,
 } from "@inertial/schemas";
-import { audit, events, review, shadow, signals, traces } from "@inertial/db";
+import {
+  audit,
+  embeddings,
+  events,
+  review,
+  shadow,
+  signals,
+  skillRegistrations as skillRegs,
+  traces,
+} from "@inertial/db";
 import { createDevDatabase } from "@inertial/db/dev";
-import { makeAuthorHistoryTool } from "@inertial/db/tools";
+import {
+  makeAuthorHistoryTool,
+  makeFindSimilarEventsTool,
+  makeGetEmbeddingTool,
+  type AuthorHistoryOutput,
+} from "@inertial/db/tools";
 import {
   applySkillsPolicy,
   evaluatePolicy,
   loadPolicyFromFile,
   selectEscalations,
 } from "@inertial/policy";
+import {
+  registerFromCatalog,
+  skillNameForCatalogId,
+} from "./skill-wiring.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 4001);
@@ -79,7 +110,10 @@ console.log(
 //    block remote-api execution model.
 const skills = new SkillRegistry()
   .register(textSpamLinkSkill)
-  .register(textToxicityLocalSkill);
+  .register(textToxicityLocalSkill)
+  // Context skills are DB-only; no API key required, always registered.
+  .register(textContextAuthorSkill)
+  .register(textContextSimilarSkill);
 
 if (anthropicAvailable()) {
   skills.register(textToxicityAnthropicSkill);
@@ -93,9 +127,50 @@ if (anthropicAvailable()) {
   );
 }
 
+if (voyageAvailable()) {
+  skills.register(textEmbedVoyageSkill);
+  console.log("[runciter] embedding skill registered: text-embed@voyage");
+} else {
+  console.log(
+    "[runciter] no VOYAGE_API_KEY — text-embed@voyage NOT registered (similar-events context will return no neighbours)",
+  );
+}
+
 // 4. Apply per-instance skill governance (block-list, exec-model gates,
 //    data-leaving-machine gate). Mutates the registry in place.
 applySkillsPolicy(skills, policy.skills);
+
+// 4b. Load any user-added skill registrations from the DB and wire them via
+//     the catalog switch (apps/runciter/src/skill-wiring.ts). Failure on a
+//     single registration is logged but doesn't block boot — operators can
+//     fix the bad config from the dashboard without bouncing the runciter.
+const userRegs = await skillRegs.listByInstance(db, "default");
+let userSkillsWired = 0;
+for (const reg of userRegs) {
+  if (!reg.enabled) continue;
+  // Skip if the env-based default is already registered for this skill name.
+  const skillName = skillNameForCatalogId(reg.catalogId);
+  if (skillName && skills.has(skillName)) {
+    console.warn(
+      `[runciter] registration ${reg.id} (${reg.catalogId}) overlaps env-based default — skipping`,
+    );
+    continue;
+  }
+  try {
+    registerFromCatalog(skills, reg);
+    userSkillsWired += 1;
+  } catch (err) {
+    console.warn(
+      `[runciter] failed to wire registration ${reg.id} (${reg.catalogId}): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+}
+console.log(
+  `[runciter] user-registered skills wired: ${userSkillsWired}/${userRegs.length}`,
+);
+
 const activeSkills = skills.list();
 console.log(
   `[runciter] active skills (${activeSkills.length}): ${activeSkills
@@ -104,7 +179,10 @@ console.log(
 );
 
 // 5. Tool registry — db-backed tools.
-const tools = new ToolRegistry().register(makeAuthorHistoryTool(db));
+const tools = new ToolRegistry()
+  .register(makeAuthorHistoryTool(db))
+  .register(makeFindSimilarEventsTool(db))
+  .register(makeGetEmbeddingTool(db));
 console.log(
   `[runciter] active tools (${tools.list().length}): ${tools
     .list()
@@ -117,7 +195,13 @@ console.log(
 //    only that. (No local image classifier ships — see CLAUDE.md "honest
 //    vision capability" section.)
 const runciter = new InMemoryRunciter({
-  agents: [new TextAgent(), new VisionAgent(["image-classify@anthropic"])],
+  agents: [
+    new TextAgent(),
+    new VisionAgent(["image-classify@anthropic"]),
+    // ContextAgent runs on every event regardless of modality; its skills
+    // degrade gracefully when prerequisites (embeddings, history) are missing.
+    new ContextAgent(),
+  ],
   skills,
   tools,
 });
@@ -172,12 +256,71 @@ app.get("/v1/events/:id", async (c) => {
     traces.listAgentTracesForEvent(db, id),
   ]);
   if (!event) return c.json({ error: "not_found" }, 404);
-  return c.json({ event, signal, traces: eventTraces });
+
+  // Resolve context inline for the dashboard. We call the existing repository
+  // helpers directly rather than going through the SkillContext — these are
+  // pure reads, no skill is being scored, so no audit entry is appropriate.
+  const [historyEvents, ownEmbedding] = await Promise.all([
+    events
+      .listContentEventsByAuthor(db, event.instance.id, event.author.id, { limit: 25 })
+      .then((rows) => rows.filter((e) => e.id !== event.id)),
+    embeddings.getEmbeddingForEvent(db, event.id, "text"),
+  ]);
+
+  const authorHistory = {
+    count: historyEvents.length,
+    totalPriorActions: historyEvents.reduce(
+      (sum, e) => sum + e.author.priorActionCount,
+      0,
+    ),
+    recent: historyEvents.slice(0, 5).map((e) => ({
+      id: e.id,
+      postedAt: e.postedAt,
+      excerpt: (e.text ?? "").slice(0, 160),
+    })),
+  };
+
+  let similarEvents: Array<{
+    contentEventId: string;
+    similarity: number;
+    excerpt: string;
+    authorHandle: string;
+  }> = [];
+  if (ownEmbedding) {
+    const neighbors = await embeddings.findSimilarEvents(db, {
+      instanceId: event.instance.id,
+      kind: "text",
+      embedding: ownEmbedding,
+      limit: 5,
+      minSimilarity: 0.7,
+    });
+    const filtered = neighbors.filter((n) => n.contentEventId !== event.id);
+    const fetched = await Promise.all(
+      filtered.slice(0, 5).map(async (n) => {
+        const ev = await events.getContentEvent(db, n.contentEventId);
+        return {
+          contentEventId: n.contentEventId,
+          similarity: n.similarity,
+          excerpt: (ev?.text ?? "").slice(0, 160),
+          authorHandle: ev?.author.handle ?? "",
+        };
+      }),
+    );
+    similarEvents = fetched;
+  }
+
+  return c.json({
+    event,
+    signal,
+    traces: eventTraces,
+    authorHistory,
+    similarEvents,
+  });
 });
 
 app.get("/v1/skills", (c) =>
   c.json({
-    skills: activeSkills.map((s) => ({
+    skills: skills.list().map((s) => ({
       name: s.name,
       version: s.version,
       provider: s.provider,
@@ -190,6 +333,166 @@ app.get("/v1/skills", (c) =>
     shadow: policy.shadow,
   }),
 );
+
+// --- Skill catalog + registrations -----------------------------------------
+
+app.get("/v1/skills/catalog", (c) => c.json({ catalog: SKILL_CATALOG }));
+
+app.get("/v1/skills/registrations", async (c) => {
+  const instanceId = c.req.query("instance") ?? "default";
+  const registrations = await skillRegs.listByInstance(db, instanceId);
+  return c.json({ registrations });
+});
+
+app.post("/v1/skills/registrations", async (c) => {
+  const raw = await c.req.json();
+  const parsed = SkillRegistrationSchema.omit({ id: true, createdAt: true }).safeParse(raw);
+  if (!parsed.success) {
+    return c.json(
+      { error: "invalid_registration", issues: parsed.error.issues },
+      400,
+    );
+  }
+  const input = parsed.data;
+  const entry = findCatalogEntry(input.catalogId);
+  if (!entry) {
+    return c.json({ error: "unknown_catalog_id", catalogId: input.catalogId }, 400);
+  }
+  // Validate providerConfig has every required field of the right shape.
+  for (const field of entry.configFields) {
+    if (!field.required) continue;
+    const v = input.providerConfig[field.key];
+    if (typeof v !== "string" || v.length === 0) {
+      return c.json(
+        {
+          error: "missing_provider_config",
+          field: field.key,
+          message: `${entry.catalogId} requires providerConfig.${field.key}`,
+        },
+        400,
+      );
+    }
+  }
+
+  const reg: SkillRegistration = {
+    id: randomUUID(),
+    instanceId: input.instanceId,
+    catalogId: input.catalogId,
+    displayName: input.displayName || entry.displayName,
+    providerConfig: input.providerConfig,
+    enabled: input.enabled,
+    createdAt: new Date().toISOString(),
+    createdBy: input.createdBy,
+  };
+
+  // Try to wire it live before persisting, so a config typo fails loudly
+  // without leaving an unwireable row in the table.
+  if (reg.enabled) {
+    const skillName = skillNameForCatalogId(reg.catalogId);
+    if (skillName && skills.has(skillName)) {
+      // Existing default occupies this slot — block it so the user version takes over.
+      skills.block(skillName);
+    }
+    try {
+      registerFromCatalog(skills, reg);
+    } catch (err) {
+      // Restore the default if we blocked it.
+      if (skillName) skills.unblock(skillName);
+      return c.json(
+        { error: "wire_failed", message: err instanceof Error ? err.message : String(err) },
+        400,
+      );
+    }
+  }
+
+  await skillRegs.save(db, reg);
+  await audit.appendAuditEntry(db, {
+    instanceId: reg.instanceId,
+    kind: "policy-updated",
+    ref: { type: "policy", id: reg.id },
+    payload: {
+      kind: "skill-registered",
+      catalogId: reg.catalogId,
+      displayName: reg.displayName,
+    },
+    actorId: reg.createdBy,
+  });
+  return c.json({ registration: reg }, 201);
+});
+
+app.patch("/v1/skills/registrations/:id", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json();
+  const existing = await skillRegs.getById(db, id);
+  if (!existing) return c.json({ error: "not_found" }, 404);
+
+  const patch: { displayName?: string; providerConfig?: Record<string, unknown>; enabled?: boolean } = {};
+  if (typeof body.displayName === "string") patch.displayName = body.displayName;
+  if (body.providerConfig && typeof body.providerConfig === "object") {
+    patch.providerConfig = body.providerConfig as Record<string, unknown>;
+  }
+  if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
+
+  const updated = await skillRegs.update(db, id, patch);
+  if (!updated) return c.json({ error: "not_found" }, 404);
+
+  // Hot-mutate the live SkillRegistry on enabled changes.
+  const skillName = skillNameForCatalogId(updated.catalogId);
+  if (skillName && typeof patch.enabled === "boolean") {
+    if (patch.enabled) {
+      // Re-wire if missing; unblock if just blocked.
+      if (skills.has(skillName)) {
+        // already active; nothing to do
+      } else {
+        try {
+          // try unblock first (cheap), else fully re-register
+          skills.unblock(skillName);
+          if (!skills.has(skillName)) registerFromCatalog(skills, updated);
+        } catch (err) {
+          console.warn(
+            `[runciter] PATCH ${id}: re-register failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+    } else {
+      skills.block(skillName);
+    }
+  }
+
+  await audit.appendAuditEntry(db, {
+    instanceId: updated.instanceId,
+    kind: "policy-updated",
+    ref: { type: "policy", id: updated.id },
+    payload: {
+      kind: typeof patch.enabled === "boolean" ? "skill-toggled" : "skill-config-updated",
+      catalogId: updated.catalogId,
+      enabled: updated.enabled,
+    },
+    actorId: null,
+  });
+  return c.json({ registration: updated });
+});
+
+app.delete("/v1/skills/registrations/:id", async (c) => {
+  const id = c.req.param("id");
+  const existing = await skillRegs.getById(db, id);
+  if (!existing) return c.json({ error: "not_found" }, 404);
+
+  const skillName = skillNameForCatalogId(existing.catalogId);
+  if (skillName) skills.block(skillName);
+
+  const deleted = await skillRegs.remove(db, id);
+  if (!deleted) return c.json({ error: "not_found" }, 404);
+
+  await audit.appendAuditEntry(db, {
+    instanceId: existing.instanceId,
+    kind: "policy-updated",
+    ref: { type: "policy", id: existing.id },
+    payload: { kind: "skill-removed", catalogId: existing.catalogId },
+    actorId: null,
+  });
+  return c.json({ ok: true });
+});
 
 app.get("/v1/audit/:instance", async (c) => {
   const instanceId = c.req.param("instance");
@@ -278,6 +581,22 @@ async function processEvent(event: ContentEvent): Promise<ProcessResult> {
     },
     actorId: null,
   });
+
+  // 1b. Embed event text BEFORE orchestration so the similar-events context
+  //     skill can find this event's own embedding when it runs in step 2.
+  //     Failure is non-fatal: the event is already persisted, similar-events
+  //     just won't find this event as a future neighbour.
+  if (event.text && event.text.trim() && voyageAvailable()) {
+    try {
+      await embedAndPersist(event);
+    } catch (err) {
+      console.warn(
+        `[runciter] embedding failed for ${event.id.slice(0, 8)}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
 
   // 2. Base orchestration — agents compose their default skills.
   const baseRun = await runciter.run(event);
@@ -529,4 +848,43 @@ function mergeChannels(
     }
   }
   return { ...signal, channels };
+}
+
+/**
+ * Run the registered embedding skill against `event.text` and persist the
+ * vector to `event_embeddings`. Caller is responsible for the voyageAvailable
+ * check; this throws on failure so the caller can audit.
+ */
+async function embedAndPersist(event: ContentEvent): Promise<void> {
+  const skill = skills.get<TextEmbedInput, TextEmbedOutput>("text-embed@voyage");
+  if (!skill) return; // shouldn't happen given caller's check, but defensive
+  const trace = new TraceCollector();
+  const ctx = makeSkillContext({
+    trace,
+    tools,
+    skills,
+    signal: new AbortController().signal,
+    runId: event.id,
+    instanceId: event.instance.id,
+  });
+  const out = await skill.run({ text: event.text ?? "" }, ctx);
+  await embeddings.saveEmbedding(db, {
+    contentEventId: event.id,
+    instanceId: event.instance.id,
+    kind: "text",
+    model: out.model,
+    embedding: out.embedding,
+  });
+  await audit.appendAuditEntry(db, {
+    instanceId: event.instance.id,
+    kind: "signal-generated",
+    ref: { type: "signal", id: event.id },
+    payload: {
+      stage: "embedding",
+      model: out.model,
+      dim: out.embedding.length,
+      inputTokens: out.inputTokens,
+    },
+    actorId: null,
+  });
 }

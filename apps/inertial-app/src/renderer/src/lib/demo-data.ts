@@ -3,10 +3,14 @@ import type {
   AuditEntry,
   ContentEvent,
   ReviewItem,
+  SkillRegistration,
   StructuredSignal,
 } from "@inertial/schemas";
 import type {
+  AuthorHistorySummary,
   EventDetail,
+  SimilarEventSummary,
+  SkillCatalogEntry,
   SkillsResponse,
   SkillAgreement,
   AuditChainVerification,
@@ -418,9 +422,10 @@ function buildCase(opts: BuildCaseOpts): DemoCase {
             ? [
                 {
                   kind: "similarity-cluster" as const,
-                  relatedEventIds: Array.from({ length: opts.similarityCluster }, (_, i) =>
-                    uuid(`${opts.seed}-related-${i}`),
-                  ),
+                  neighbors: Array.from({ length: opts.similarityCluster }, (_, i) => ({
+                    contentEventId: uuid(`${opts.seed}-related-${i}`),
+                    similarity: 0.86 - i * 0.02,
+                  })),
                   score: 0.84,
                 },
               ]
@@ -540,7 +545,51 @@ export function getDemoQueue(): ReviewItem[] {
 export function getDemoEventDetail(eventId: string): EventDetail | null {
   const c = CASES.find((c) => c.event.id === eventId);
   if (!c) return null;
-  return { event: c.event, signal: c.signal, traces: c.traces };
+  return {
+    event: c.event,
+    signal: c.signal,
+    traces: c.traces,
+    authorHistory: synthesizeAuthorHistory(c),
+    similarEvents: synthesizeSimilarEvents(c),
+  };
+}
+
+/** Pull recent events from the same demo author. Quick + deterministic. */
+function synthesizeAuthorHistory(self: DemoCase): AuthorHistorySummary {
+  const sameAuthor = CASES.filter(
+    (c) => c.event.author.id === self.event.author.id && c.event.id !== self.event.id,
+  );
+  return {
+    count: sameAuthor.length + self.event.author.priorActionCount,
+    totalPriorActions: self.event.author.priorActionCount,
+    recent: sameAuthor.slice(0, 3).map((c) => ({
+      id: c.event.id,
+      postedAt: c.event.postedAt,
+      excerpt: (c.event.text ?? "(media post)").slice(0, 160),
+    })),
+  };
+}
+
+/** Surface 1-2 demo neighbours for events whose channels suggest similarity
+ *  matters (toxicity / brigading / spam). For benign cases, return empty. */
+function synthesizeSimilarEvents(self: DemoCase): SimilarEventSummary[] {
+  const channels = self.signal ? Object.keys(self.signal.channels) : [];
+  const interesting = channels.some((c) =>
+    [
+      "toxic",
+      "spam-link-presence",
+      "brigading",
+      "context.similar-events-recent",
+    ].includes(c),
+  );
+  if (!interesting) return [];
+  const others = CASES.filter((c) => c.event.id !== self.event.id).slice(0, 2);
+  return others.map((c, i) => ({
+    contentEventId: c.event.id,
+    similarity: 0.86 - i * 0.04,
+    excerpt: (c.event.text ?? "(media post)").slice(0, 160),
+    authorHandle: c.event.author.handle,
+  }));
 }
 
 export function getDemoAvatar(handle: string): string {
@@ -684,6 +733,151 @@ export function getDemoShadowAgreement(): SkillAgreement[] {
       agreement: 16 / 18,
       shadowMissed: 1,
       shadowOverflagged: 1,
+    },
+  ];
+}
+
+/**
+ * Demo catalog. Mirrors the v1 entries in @inertial/core's `SKILL_CATALOG`
+ * so the dashboard renders identically with or without the runciter running.
+ * Keep these two in sync — the runciter is the source of truth in production.
+ */
+export function getDemoSkillCatalog(): SkillCatalogEntry[] {
+  return [
+    {
+      catalogId: "local-text-spam-link",
+      family: "text-detect-spam-link",
+      displayName: "Spam-link detector",
+      provider: "regex",
+      executionModel: "in-process",
+      dataLeavesMachine: false,
+      costEstimateUsd: 0,
+      description: "Heuristic URL presence check. Tier 0, free.",
+      configFields: [],
+      defaultEnabled: true,
+    },
+    {
+      catalogId: "local-text-toxicity",
+      family: "text-classify-toxicity@local",
+      displayName: "Toxic-BERT (local)",
+      provider: "transformers.js",
+      executionModel: "in-process",
+      dataLeavesMachine: false,
+      costEstimateUsd: 0,
+      description: "ONNX port of toxic-bert running in-process via transformers.js.",
+      configFields: [],
+      defaultEnabled: true,
+    },
+    {
+      catalogId: "local-text-context-author",
+      family: "text-context-author@local",
+      displayName: "Author history",
+      provider: "db",
+      executionModel: "in-process",
+      dataLeavesMachine: false,
+      costEstimateUsd: 0,
+      description: "Reputation context from the author's prior moderated events.",
+      configFields: [],
+      defaultEnabled: true,
+    },
+    {
+      catalogId: "local-text-context-similar",
+      family: "text-context-similar@local",
+      displayName: "Similar events",
+      provider: "db",
+      executionModel: "in-process",
+      dataLeavesMachine: false,
+      costEstimateUsd: 0,
+      description:
+        "pgvector cosine search over recent events. Requires an embedding skill (Voyage) to be active.",
+      configFields: [],
+      defaultEnabled: true,
+    },
+    {
+      catalogId: "anthropic-text-toxicity",
+      family: "text-classify-toxicity@anthropic",
+      displayName: "Claude toxicity",
+      provider: "anthropic",
+      executionModel: "remote-api",
+      dataLeavesMachine: true,
+      costEstimateUsd: 0.003,
+      description:
+        "Claude Sonnet classifying the same six toxic-bert channels. Stronger on dog-whistles + coded language.",
+      envVarHint: "ANTHROPIC_API_KEY",
+      configFields: [
+        {
+          key: "apiKey",
+          label: "Anthropic API key",
+          type: "secret",
+          required: true,
+          placeholder: "sk-ant-...",
+          description: "Stored in the runciter's `skill_registrations` table.",
+        },
+      ],
+      defaultEnabled: false,
+    },
+    {
+      catalogId: "anthropic-image-nsfw",
+      family: "image-classify@anthropic",
+      displayName: "Claude vision NSFW",
+      provider: "anthropic",
+      executionModel: "remote-api",
+      dataLeavesMachine: true,
+      costEstimateUsd: 0.005,
+      description:
+        "Multimodal Claude classifying images for NSFW + nudity + violence channels.",
+      envVarHint: "ANTHROPIC_API_KEY",
+      configFields: [
+        {
+          key: "apiKey",
+          label: "Anthropic API key",
+          type: "secret",
+          required: true,
+          placeholder: "sk-ant-...",
+        },
+      ],
+      defaultEnabled: false,
+    },
+    {
+      catalogId: "voyage-text-embedding",
+      family: "text-embed@voyage",
+      displayName: "Voyage embeddings",
+      provider: "voyage",
+      executionModel: "remote-api",
+      dataLeavesMachine: true,
+      costEstimateUsd: 0.00002,
+      description:
+        "voyage-3-large at 1536-dim — populates event_embeddings so similar-events context can fire.",
+      envVarHint: "VOYAGE_API_KEY",
+      configFields: [
+        {
+          key: "apiKey",
+          label: "Voyage API key",
+          type: "secret",
+          required: true,
+          placeholder: "pa-...",
+          description:
+            "Free tier covers ~50M tokens — enough for dev + small instances.",
+        },
+      ],
+      defaultEnabled: false,
+    },
+  ];
+}
+
+/** One pre-baked user-added skill so the dashboard's "user" chip + toggle has
+ *  something to render in demo mode. */
+export function getDemoSkillRegistrations(): SkillRegistration[] {
+  return [
+    {
+      id: uuid("demo-reg-voyage"),
+      instanceId: "default",
+      catalogId: "voyage-text-embedding",
+      displayName: "Voyage embeddings",
+      providerConfig: { apiKey: "pa-demo-***-redacted" },
+      enabled: true,
+      createdAt: new Date(NOW - 86_400_000 * 2).toISOString(),
+      createdBy: "ieuan@local",
     },
   ];
 }

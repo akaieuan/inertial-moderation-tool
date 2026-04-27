@@ -368,6 +368,46 @@ export const auditEntries = pgTable(
 );
 
 /**
+ * User-added skill activations, scoped per instance.
+ *
+ * Default skills (regex, text-toxicity-local, etc.) are hard-coded in the
+ * runciter boot path and do NOT have a row here. Rows are only created when
+ * an operator explicitly enables a catalog entry via the dashboard's
+ * "Add skill" sheet (cf. POST /v1/skills/registrations).
+ *
+ * `provider_config` is a free JSONB blob whose shape is dictated by the
+ * matching SKILL_CATALOG entry's `configFields` — typically `{ apiKey }`.
+ * The runciter validates shape against the catalog before inserting.
+ */
+export const skillRegistrations = pgTable(
+  "skill_registrations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    instanceId: text("instance_id").notNull(),
+    /** FK into SKILL_CATALOG (in @inertial/core). String not enum so adding a
+     *  new catalog entry doesn't require a DB migration. */
+    catalogId: text("catalog_id").notNull(),
+    displayName: text("display_name").notNull(),
+    providerConfig: jsonb("provider_config")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+    /** Operator handle. Null for seed/system registrations. */
+    createdBy: text("created_by"),
+  },
+  (t) => [
+    index("idx_skill_regs_instance").on(t.instanceId),
+    // One activation per (instance, catalog entry). Re-enabling toggles the
+    // existing row's `enabled`, doesn't insert a duplicate.
+    uniqueIndex("uq_skill_regs_instance_catalog").on(t.instanceId, t.catalogId),
+  ],
+);
+
+/**
  * Vector index for ContextAgent similarity-cluster evidence. One row per
  * (event, kind) pair. 1536 is the OpenAI text-embedding-3-small dimension —
  * change here + in the migration if you swap models.

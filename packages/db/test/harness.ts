@@ -50,6 +50,7 @@ export async function createTestHarness(): Promise<TestHarness> {
           event_embeddings,
           audit_entries,
           policies,
+          skill_registrations,
           content_events
         RESTART IDENTITY CASCADE
       `);
