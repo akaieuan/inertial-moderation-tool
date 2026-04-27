@@ -17,7 +17,7 @@
     "test": "turbo run test",
     "smoke": "node scripts/smoke.mjs",
     "seed": "node scripts/seed.mjs",
-    "demo:setup": "pnpm rebuild electron",
+    "demo:setup": "test -d apps/inertial-app/node_modules/electron/dist || node apps/inertial-app/node_modules/electron/install.js",
     "predemo": "pnpm demo:setup",
     "demo": "concurrently -n runciter,gateway,app -c cyan,green,magenta --kill-others-on-fail 'pnpm --filter @inertial/runciter dev' 'pnpm --filter @inertial/gateway dev' 'pnpm --filter @inertial/app dev'",
     "db:up": "docker compose up -d postgres && docker compose exec -T postgres bash -c 'until pg_isready -U aur -d aur; do sleep 1; done'",
@@ -32,5 +32,14 @@
     "turbo": "^2.3.3",
     "typescript": "^5.7.3",
     "@types/node": "^22.10.5"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild",
+      "onnxruntime-node",
+      "protobufjs",
+      "sharp"
+    ]
   }
 }
