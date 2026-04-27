@@ -17,6 +17,9 @@
     "test": "turbo run test",
     "smoke": "node scripts/smoke.mjs",
     "seed": "node scripts/seed.mjs",
+    "demo:setup": "pnpm rebuild electron",
+    "predemo": "pnpm demo:setup",
+    "demo": "concurrently -n runciter,gateway,app -c cyan,green,magenta --kill-others-on-fail 'pnpm --filter @inertial/runciter dev' 'pnpm --filter @inertial/gateway dev' 'pnpm --filter @inertial/app dev'",
     "db:up": "docker compose up -d postgres && docker compose exec -T postgres bash -c 'until pg_isready -U aur -d aur; do sleep 1; done'",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f postgres",
@@ -25,6 +28,7 @@
     "clean": "turbo run clean && rm -rf node_modules"
   },
   "devDependencies": {
+    "concurrently": "^9.1.2",
     "turbo": "^2.3.3",
     "typescript": "^5.7.3",
     "@types/node": "^22.10.5"
