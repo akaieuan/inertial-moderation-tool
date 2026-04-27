@@ -2,6 +2,7 @@ import type {
   AgentTrace,
   AuditEntry,
   ContentEvent,
+  EvalRun,
   ReviewItem,
   SkillRegistration,
   StructuredSignal,
@@ -9,10 +10,13 @@ import type {
 import type {
   AuthorHistorySummary,
   EventDetail,
+  PersistedReviewerTag,
   SimilarEventSummary,
   SkillCatalogEntry,
   SkillsResponse,
   SkillAgreement,
+  TagCatalogEntry,
+  TagFrequencyRow,
   AuditChainVerification,
 } from "./api.js";
 
@@ -880,4 +884,175 @@ export function getDemoSkillRegistrations(): SkillRegistration[] {
       createdBy: "ieuan@local",
     },
   ];
+}
+
+// --- Eval harness demo data ----------------------------------------------
+
+/** Hand-built calibration rows that look plausible after a real eval run. */
+function makeDemoCalibrations() {
+  return [
+    {
+      skillName: "text-classify-toxicity@local",
+      channelName: "toxic",
+      brierScore: 0.0421,
+      ece: 0.0312,
+      agreement: 0.91,
+      samples: 24,
+      meanPredicted: 0.41,
+      meanActual: 0.38,
+    },
+    {
+      skillName: "text-classify-toxicity@local",
+      channelName: "insult",
+      brierScore: 0.0508,
+      ece: 0.0405,
+      agreement: 0.88,
+      samples: 18,
+      meanPredicted: 0.36,
+      meanActual: 0.31,
+    },
+    {
+      skillName: "text-classify-toxicity@local",
+      channelName: "obscene",
+      brierScore: 0.0317,
+      ece: 0.0289,
+      agreement: 0.94,
+      samples: 12,
+      meanPredicted: 0.18,
+      meanActual: 0.21,
+    },
+    {
+      skillName: "text-classify-toxicity@local",
+      channelName: "threat",
+      brierScore: 0.1182,
+      ece: 0.0903,
+      agreement: 0.79,
+      samples: 8,
+      meanPredicted: 0.34,
+      meanActual: 0.62,
+    },
+    {
+      skillName: "text-detect-spam-link",
+      channelName: "spam-link-presence",
+      brierScore: 0.0214,
+      ece: 0.0141,
+      agreement: 0.97,
+      samples: 14,
+      meanPredicted: 0.44,
+      meanActual: 0.46,
+    },
+    {
+      skillName: "text-context-author@local",
+      channelName: "context.author-prior-actions",
+      brierScore: 0.1402,
+      ece: 0.1108,
+      agreement: 0.78,
+      samples: 30,
+      meanPredicted: 0.22,
+      meanActual: 0.18,
+    },
+  ];
+}
+
+export function getDemoLatestEvalRun(): EvalRun {
+  return {
+    id: uuid("demo-eval-latest"),
+    instanceId: "default",
+    goldSetVersion: "gold-set-v1",
+    goldSetSize: 30,
+    status: "completed",
+    meanLatencyMs: 87,
+    startedAt: new Date(NOW - 1000 * 60 * 25).toISOString(),
+    endedAt: new Date(NOW - 1000 * 60 * 24).toISOString(),
+    skillCalibrations: makeDemoCalibrations(),
+    triggeredBy: "dashboard",
+  };
+}
+
+export function getDemoEvalRuns(): EvalRun[] {
+  const cals = makeDemoCalibrations();
+  // Six runs over the past two weeks with slightly varying scores so the
+  // history table + trend lines look alive.
+  return Array.from({ length: 6 }, (_, i) => {
+    const ageDays = i * 2;
+    const drift = i * 0.002;
+    return {
+      id: uuid(`demo-eval-run-${i}`),
+      instanceId: "default",
+      goldSetVersion: "gold-set-v1",
+      goldSetSize: 30,
+      status: "completed",
+      meanLatencyMs: 80 + i * 4,
+      startedAt: new Date(NOW - 86_400_000 * ageDays - 1000 * 60 * 30).toISOString(),
+      endedAt: new Date(NOW - 86_400_000 * ageDays).toISOString(),
+      skillCalibrations: cals.map((c) => ({
+        ...c,
+        brierScore: Math.max(0, c.brierScore - drift),
+        ece: Math.max(0, c.ece - drift),
+      })),
+      triggeredBy: i === 0 ? "dashboard" : "ci",
+    } satisfies EvalRun;
+  });
+}
+
+// --- Tag layer demo data --------------------------------------------------
+
+/** Mirror of @inertial/core's TAG_CATALOG so the dashboard renders identically
+ *  in demo mode without hitting the runciter. Keep in sync. */
+export function getDemoTagCatalog(): TagCatalogEntry[] {
+  return [
+    { tagId: "text.tone-violation", displayName: "Toxic tone", description: "Hostile / demeaning tone the local classifier missed.", applicableModalities: ["text"], severity: "warn", group: "Toxicity", supportsSegmentScope: false, supportsSpanScope: true },
+    { tagId: "text.pii-present", displayName: "PII exposed", description: "Personally identifiable info in the text.", applicableModalities: ["text"], severity: "danger", group: "Privacy", supportsSegmentScope: false, supportsSpanScope: true },
+    { tagId: "text.coded-language", displayName: "Coded / dog-whistle", description: "In-group terminology invisible to local classifiers.", applicableModalities: ["text"], severity: "warn", group: "Toxicity", supportsSegmentScope: false, supportsSpanScope: true },
+    { tagId: "text.context-misleading", displayName: "Misleading framing", description: "Frames a claim or link in a misleading way.", applicableModalities: ["text"], severity: "warn", group: "Context", supportsSegmentScope: false, supportsSpanScope: true },
+    { tagId: "image.benign", displayName: "Benign image", description: "Image itself contains nothing actionable.", applicableModalities: ["image"], severity: "neutral", group: "Validation", supportsSegmentScope: false, supportsSpanScope: false },
+    { tagId: "image.violence", displayName: "Visual violence", description: "Gore, weapons, depicted physical violence.", applicableModalities: ["image"], severity: "danger", group: "Violence", supportsSegmentScope: false, supportsSpanScope: false },
+    { tagId: "image.minor-present", displayName: "Minor present", description: "Identifiable presence of a minor.", applicableModalities: ["image"], severity: "danger", group: "Safety", supportsSegmentScope: false, supportsSpanScope: false },
+    { tagId: "image.context-misleading", displayName: "Misleading image", description: "Image misrepresents a person or claim.", applicableModalities: ["image"], severity: "warn", group: "Context", supportsSegmentScope: false, supportsSpanScope: false },
+    { tagId: "video.visual-benign", displayName: "Video visual: benign", description: "Visual track has no violation.", applicableModalities: ["video"], severity: "neutral", group: "Validation", supportsSegmentScope: true, supportsSpanScope: false },
+    { tagId: "video.visual-violation", displayName: "Video visual: violation", description: "Visual content depicts NSFW or violence.", applicableModalities: ["video"], severity: "danger", group: "Violence", supportsSegmentScope: true, supportsSpanScope: false },
+    { tagId: "video.audio-violation", displayName: "Video audio: violation", description: "Audio track contains violation; visual may be fine.", applicableModalities: ["video"], severity: "danger", group: "Audio", supportsSegmentScope: true, supportsSpanScope: false },
+    { tagId: "video.temporal-pattern", displayName: "Temporal pattern", description: "Violation only emerges over time.", applicableModalities: ["video"], severity: "warn", group: "Context", supportsSegmentScope: true, supportsSpanScope: false },
+    { tagId: "audio.harassment", displayName: "Audio harassment", description: "Spoken harassment, slurs, or threats.", applicableModalities: ["audio", "video"], severity: "danger", group: "Audio", supportsSegmentScope: true, supportsSpanScope: false },
+    { tagId: "audio.coded-speech", displayName: "Coded audio speech", description: "Spoken in-group / dog-whistle terminology.", applicableModalities: ["audio", "video"], severity: "warn", group: "Audio", supportsSegmentScope: true, supportsSpanScope: false },
+    { tagId: "audio.benign", displayName: "Audio benign", description: "Audio track has no violation.", applicableModalities: ["audio", "video"], severity: "neutral", group: "Validation", supportsSegmentScope: true, supportsSpanScope: false },
+    { tagId: "cross-modal.text-image-mismatch", displayName: "Text/image mismatch", description: "Text describes one thing; image shows another.", applicableModalities: ["cross-modal"], severity: "warn", group: "Context", supportsSegmentScope: false, supportsSpanScope: false },
+    { tagId: "cross-modal.satire-flag", displayName: "Satire / parody", description: "Apparent violation is satire — label, don't remove.", applicableModalities: ["cross-modal"], severity: "info", group: "Context", supportsSegmentScope: false, supportsSpanScope: false },
+    { tagId: "cross-modal.context-required", displayName: "Needs context", description: "Decision needs more context (linked thread, history).", applicableModalities: ["cross-modal"], severity: "info", group: "Context", supportsSegmentScope: false, supportsSpanScope: false },
+  ];
+}
+
+export function getDemoReviewerTagsForEvent(_eventId: string): PersistedReviewerTag[] {
+  // Return a couple of plausible tags so the QueueDetailPanel chip section
+  // isn't empty in demo mode. We don't gate on eventId — every demo event
+  // gets the same starter tags.
+  void _eventId;
+  return [
+    {
+      id: uuid(`demo-tag-1-${_eventId}`),
+      contentEventId: _eventId,
+      reviewDecisionId: uuid(`demo-decision-${_eventId}`),
+      instanceId: "default",
+      reviewerId: "ieuan@local",
+      tagId: "text.tone-violation",
+      scope: { modality: "text" },
+      note: "directed at the OP",
+      createdAt: new Date(NOW - 86_400_000).toISOString(),
+    },
+  ];
+}
+
+export function getDemoTagFrequencies(): { frequencies: TagFrequencyRow[]; total: number } {
+  const frequencies: TagFrequencyRow[] = [
+    { tagId: "text.tone-violation", count: 24 },
+    { tagId: "text.coded-language", count: 18 },
+    { tagId: "image.benign", count: 12 },
+    { tagId: "video.audio-violation", count: 9 },
+    { tagId: "audio.harassment", count: 8 },
+    { tagId: "cross-modal.satire-flag", count: 6 },
+    { tagId: "image.violence", count: 4 },
+    { tagId: "text.pii-present", count: 3 },
+  ];
+  const total = frequencies.reduce((acc, f) => acc + f.count, 0);
+  return { frequencies, total };
 }

@@ -38,3 +38,11 @@ export {
   type SkillCatalogEntry,
   type SkillCatalogConfigField,
 } from "./skill-catalog.js";
+export {
+  TAG_CATALOG,
+  findTagEntry,
+  tagsForModality,
+  type TagCatalogEntry,
+  type TagModality,
+  type TagSeverity,
+} from "./tag-catalog.js";

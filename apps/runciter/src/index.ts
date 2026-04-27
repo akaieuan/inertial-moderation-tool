@@ -11,6 +11,7 @@ import {
   TraceCollector,
   makeSkillContext,
   SKILL_CATALOG,
+  TAG_CATALOG,
   findCatalogEntry,
   type Skill,
   type SignalOutput,
@@ -42,6 +43,7 @@ import {
   SkillRegistrationSchema,
   type AgentTrace,
   type ContentEvent,
+  type GoldEvent,
   type PolicyAction,
   type ReviewItem,
   type SignalChannel,
@@ -51,8 +53,11 @@ import {
 import {
   audit,
   embeddings,
+  evalRuns as evalRunsRepo,
   events,
+  goldEvents as goldEventsRepo,
   review,
+  reviewerTags as reviewerTagsRepo,
   shadow,
   signals,
   skillRegistrations as skillRegs,
@@ -65,6 +70,11 @@ import {
   makeGetEmbeddingTool,
   type AuthorHistoryOutput,
 } from "@inertial/db/tools";
+import {
+  convertDecisionToGoldEvent,
+  loadGoldSetFromFile,
+  runEval,
+} from "@inertial/eval";
 import {
   applySkillsPolicy,
   evaluatePolicy,
@@ -210,6 +220,45 @@ const runciter = new InMemoryRunciter({
 console.log("[runciter] warming skills (toxic-bert downloads on first run)…");
 await skills.warmupAll();
 console.log("[runciter] skills ready");
+
+// 8. Load the hand-labeled gold set if present. Idempotent: re-running on
+//    boot replaces existing rows for the same (contentEventId, source) pair,
+//    so editing the JSONL during dev just hot-reloads the labels.
+const GOLD_SET_PATH = resolve(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "config",
+  "evals",
+  "gold-set-v1.jsonl",
+);
+const GOLD_SET_VERSION = "gold-set-v1";
+
+try {
+  const { entries, errors } = await loadGoldSetFromFile(GOLD_SET_PATH);
+  if (errors.length > 0) {
+    console.warn(
+      `[runciter] gold set: ${errors.length} parse error(s) — first: line ${errors[0]!.line}: ${errors[0]!.reason}`,
+    );
+  }
+  for (const entry of entries) {
+    await events.saveContentEvent(db, entry.event);
+    await goldEventsRepo.save(db, entry.goldEvent);
+  }
+  console.log(
+    `[runciter] gold set ${GOLD_SET_VERSION} loaded: ${entries.length} hand-labeled event(s)`,
+  );
+} catch (err) {
+  // Gold set is optional — if the file's missing the runciter still boots.
+  if ((err as { code?: string })?.code === "ENOENT") {
+    console.log(`[runciter] gold set ${GOLD_SET_VERSION} not present at ${GOLD_SET_PATH} — skipping`);
+  } else {
+    console.warn(
+      `[runciter] gold set load failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
 
 // ---------------------------------------------------------------------------
 // HTTP
@@ -517,6 +566,111 @@ app.get("/v1/shadow/:instance/agreement", async (c) => {
   return c.json({ skills: rows });
 });
 
+// --- Eval harness ----------------------------------------------------------
+
+app.get("/v1/eval/runs", async (c) => {
+  const instanceId = c.req.query("instance") ?? "default";
+  const limit = c.req.query("limit");
+  const runs = await evalRunsRepo.listByInstance(db, instanceId, {
+    limit: limit ? Number(limit) : 20,
+  });
+  return c.json({ runs });
+});
+
+app.get("/v1/eval/runs/latest", async (c) => {
+  const instanceId = c.req.query("instance") ?? "default";
+  const run = await evalRunsRepo.getLatestCompleted(db, instanceId);
+  return c.json({ run });
+});
+
+app.get("/v1/eval/runs/:id", async (c) => {
+  const id = c.req.param("id");
+  const run = await evalRunsRepo.getById(db, id);
+  if (!run) return c.json({ error: "not_found" }, 404);
+  return c.json({ run });
+});
+
+app.post("/v1/eval/runs", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const instanceId: string = body.instanceId ?? "default";
+  const goldSetVersion: string = body.goldSetVersion ?? GOLD_SET_VERSION;
+  const triggeredBy: string | null = body.triggeredBy ?? "dashboard";
+
+  // Pull the gold events from the DB. We rely on the boot loader (or earlier
+  // POSTs) having seeded them — empty set is a 400.
+  const goldEvents = await goldEventsRepo.listByInstance(db, instanceId, {
+    limit: 1000,
+  });
+  if (goldEvents.length === 0) {
+    return c.json(
+      { error: "no_gold_events", instanceId, hint: "load config/evals/gold-set-v1.jsonl first" },
+      400,
+    );
+  }
+
+  // Persist a `running` row up front so the dashboard can poll for progress.
+  const row = await evalRunsRepo.start(db, {
+    instanceId,
+    goldSetVersion,
+    goldSetSize: goldEvents.length,
+    triggeredBy,
+  });
+  await audit.appendAuditEntry(db, {
+    instanceId,
+    kind: "eval-run-started",
+    ref: { type: "eval-run", id: row.id },
+    payload: { goldSetVersion, goldSetSize: goldEvents.length },
+    actorId: triggeredBy,
+  });
+
+  // Run the eval async — return 202 immediately so the dashboard can poll.
+  // Failure is logged + persisted as status=failed; we never let an eval
+  // error crash the runciter.
+  void runAndPersistEval(row.id, goldEvents, instanceId, goldSetVersion).catch(
+    (err) => {
+      console.warn(
+        `[runciter] eval run ${row.id} failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    },
+  );
+
+  return c.json({ runId: row.id, status: "running" }, 202);
+});
+
+// --- Reviewer tag layer --------------------------------------------------
+
+app.get("/v1/tags/catalog", (c) => c.json({ catalog: TAG_CATALOG }));
+
+app.get("/v1/tags", async (c) => {
+  const eventId = c.req.query("eventId");
+  if (!eventId) return c.json({ error: "missing_eventId" }, 400);
+  const tags = await reviewerTagsRepo.listForEvent(db, eventId);
+  return c.json({ tags });
+});
+
+app.get("/v1/tags/frequencies", async (c) => {
+  const instanceId = c.req.query("instance") ?? "default";
+  const frequencies = await reviewerTagsRepo.frequenciesByInstance(db, instanceId);
+  const total = await reviewerTagsRepo.countByInstance(db, instanceId);
+  return c.json({ frequencies, total });
+});
+
+app.get("/v1/eval/gold-events", async (c) => {
+  const instanceId = c.req.query("instance") ?? "default";
+  const channel = c.req.query("channel") ?? undefined;
+  const source = c.req.query("source") as
+    | "hand-labeled"
+    | "reviewer-derived"
+    | undefined;
+  const limit = c.req.query("limit");
+  const goldEvents = await goldEventsRepo.listByInstance(db, instanceId, {
+    channel,
+    source,
+    limit: limit ? Number(limit) : 200,
+  });
+  return c.json({ goldEvents, total: goldEvents.length });
+});
+
 app.post("/v1/reviews/:id/decisions", async (c) => {
   const reviewItemId = c.req.param("id");
   const body = await c.req.json();
@@ -535,6 +689,21 @@ app.post("/v1/reviews/:id/decisions", async (c) => {
 
   await review.appendReviewDecision(db, decision.data);
   await review.updateReviewItemState(db, reviewItemId, "decided", decision.data.verdict);
+
+  // Persist any reviewer tags that came in alongside the decision.
+  // The decision itself already carries them via the schema (validated), so
+  // each row here is a flattened view of decision.data.reviewerTags.
+  const tagInputs = (decision.data.reviewerTags ?? []).map((tag) => ({
+    contentEventId: item.contentEventId,
+    reviewDecisionId: decision.data.id,
+    instanceId: item.instanceId,
+    reviewerId: decision.data.reviewerId,
+    tag,
+  }));
+  if (tagInputs.length > 0) {
+    await reviewerTagsRepo.saveMany(db, tagInputs);
+  }
+
   await audit.appendAuditEntry(db, {
     instanceId: item.instanceId,
     kind: "decision-recorded",
@@ -543,9 +712,38 @@ app.post("/v1/reviews/:id/decisions", async (c) => {
       verdict: decision.data.verdict,
       rationale: decision.data.rationale ?? null,
       durationMs: decision.data.durationMs,
+      reviewerTagCount: tagInputs.length,
     },
     actorId: decision.data.reviewerId,
   });
+
+  // Auto-promote to a reviewer-derived gold event when the reviewer left
+  // signalFeedback or reviewer tags. This is the throughline that grows the gold set
+  // organically — every commit decision becomes a free gold label.
+  // Failure here is non-fatal: the decision is already saved.
+  try {
+    const [contentEvent, signal] = await Promise.all([
+      events.getContentEvent(db, item.contentEventId),
+      signals.getStructuredSignal(db, item.contentEventId),
+    ]);
+    if (contentEvent) {
+      const goldEvent = convertDecisionToGoldEvent({
+        decision: decision.data,
+        contentEvent,
+        signal,
+      });
+      if (goldEvent) {
+        await goldEventsRepo.save(db, goldEvent);
+      }
+    }
+  } catch (err) {
+    console.warn(
+      `[runciter] reviewer-derived gold-event promotion failed for decision ${decision.data.id}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
   return c.json({ ok: true, decisionId: decision.data.id });
 });
 
@@ -887,4 +1085,72 @@ async function embedAndPersist(event: ContentEvent): Promise<void> {
     },
     actorId: null,
   });
+}
+
+/**
+ * Async eval run executor. Walks the gold set through the live runciter,
+ * scores results, and persists the completed EvalRun + per-(skill, channel)
+ * calibrations. Errors are caught + recorded as status=failed.
+ */
+async function runAndPersistEval(
+  runId: string,
+  goldEvents: GoldEvent[],
+  instanceId: string,
+  goldSetVersion: string,
+): Promise<void> {
+  try {
+    const result = await runEval({
+      goldEvents,
+      goldSetVersion,
+      instanceId,
+      triggeredBy: "dashboard",
+      // Resolve content events from the DB — the boot loader populated them.
+      getContentEvent: async (gold) => events.getContentEvent(db, gold.contentEventId),
+      // Use the actual production runciter — same skill registry, same dispatch.
+      evaluate: async (event) => {
+        const r = await runciter.run(event);
+        return r.signal;
+      },
+    });
+
+    const completed = await evalRunsRepo.complete(db, runId, {
+      meanLatencyMs: result.run.meanLatencyMs ?? 0,
+      calibrations: result.run.skillCalibrations,
+    });
+
+    await audit.appendAuditEntry(db, {
+      instanceId,
+      kind: "eval-run-completed",
+      ref: { type: "eval-run", id: runId },
+      payload: {
+        goldSetVersion,
+        goldSetSize: result.run.goldSetSize,
+        completed: result.predictions.length,
+        unresolved: result.unresolved.length,
+        failed: result.failed.length,
+        calibrationCount: result.run.skillCalibrations.length,
+        meanLatencyMs: completed?.meanLatencyMs ?? 0,
+      },
+      actorId: "dashboard",
+    });
+
+    console.log(
+      `[runciter] eval ${runId.slice(0, 8)} done: ${result.predictions.length}/${
+        result.run.goldSetSize
+      } scored, ${result.run.skillCalibrations.length} (skill, channel) rows`,
+    );
+  } catch (err) {
+    await evalRunsRepo.fail(db, runId, err instanceof Error ? err.message : String(err));
+    await audit.appendAuditEntry(db, {
+      instanceId,
+      kind: "eval-run-completed",
+      ref: { type: "eval-run", id: runId },
+      payload: {
+        status: "failed",
+        error: err instanceof Error ? err.message : String(err),
+      },
+      actorId: "dashboard",
+    });
+    throw err;
+  }
 }

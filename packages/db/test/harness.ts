@@ -43,6 +43,10 @@ export async function createTestHarness(): Promise<TestHarness> {
       // also resets sequence counters between tests.
       await drizzleDb.execute(sql`
         TRUNCATE TABLE
+          skill_calibrations,
+          eval_runs,
+          gold_events,
+          reviewer_tags,
           review_decisions,
           review_items,
           structured_signals,

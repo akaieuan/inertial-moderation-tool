@@ -33,10 +33,19 @@ export const AuditEntrySchema = z.object({
     "action-dispatched",
     "policy-updated",
     "reviewer-overridden",
+    // Eval harness: runs are part of the chain so verification is provable.
+    "eval-run-started",
+    "eval-run-completed",
   ]),
   /** Stable reference to the entity this entry concerns. */
   ref: z.object({
-    type: z.enum(["content-event", "signal", "review-item", "policy"]),
+    type: z.enum([
+      "content-event",
+      "signal",
+      "review-item",
+      "policy",
+      "eval-run",
+    ]),
     id: z.string(),
   }),
   /** Free-form payload. Schema varies by kind; canonicalized before hashing. */

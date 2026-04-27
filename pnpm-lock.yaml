@@ -8,6 +8,27 @@ importers:
 
   .:
     devDependencies:
+      '@inertial/agents-cloud':
+        specifier: workspace:*
+        version: link:packages/agents/cloud
+      '@inertial/agents-context':
+        specifier: workspace:*
+        version: link:packages/agents/context
+      '@inertial/agents-text':
+        specifier: workspace:*
+        version: link:packages/agents/text
+      '@inertial/agents-vision':
+        specifier: workspace:*
+        version: link:packages/agents/vision
+      '@inertial/core':
+        specifier: workspace:*
+        version: link:packages/core
+      '@inertial/db':
+        specifier: workspace:*
+        version: link:packages/db
+      '@inertial/eval':
+        specifier: workspace:*
+        version: link:packages/eval
       '@types/node':
         specifier: ^22.10.5
         version: 22.19.17
@@ -145,6 +166,9 @@ importers:
       '@inertial/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@inertial/eval':
+        specifier: workspace:*
+        version: link:../../packages/eval
       '@inertial/policy':
         specifier: workspace:*
         version: link:../../packages/policy
@@ -366,10 +390,16 @@ importers:
       '@inertial/schemas':
         specifier: workspace:*
         version: link:../schemas
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
     devDependencies:
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.17)(lightningcss@1.32.0)
 
   packages/policy:
     dependencies:

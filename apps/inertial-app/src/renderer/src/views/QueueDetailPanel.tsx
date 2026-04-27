@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronUp, X as CloseIcon } from "lucide-react";
+import { Check, ChevronUp, X as CloseIcon, Tag } from "lucide-react";
 import type {
   AgentTrace,
+  ReviewerTag,
   ReviewItem,
   ReviewVerdict,
   StructuredSignal,
@@ -11,6 +12,7 @@ import { ChannelChip } from "../components/ChannelChip.js";
 import { ImageEvidence, type BboxOverlay } from "../components/ImageEvidence.js";
 import { AuthorBadge } from "../components/AuthorBadge.js";
 import { RelativeTime } from "../components/RelativeTime.js";
+import { ReviewerTagPicker } from "../components/ReviewerTagPicker.js";
 import {
   Card,
   CardContent,
@@ -20,7 +22,15 @@ import {
 import { Button } from "../components/ui/button.js";
 import { Separator } from "../components/ui/separator.js";
 import { Skeleton } from "../components/ui/skeleton.js";
-import { commitDecision, getEventDetail, type EventDetail } from "../lib/api.js";
+import {
+  commitDecision,
+  getEventDetail,
+  getTagCatalog,
+  listReviewerTagsForEvent,
+  type EventDetail,
+  type PersistedReviewerTag,
+  type TagCatalogEntry,
+} from "../lib/api.js";
 import { cn } from "../lib/utils.js";
 
 const REVIEWER = "ieuan@local";
@@ -37,6 +47,11 @@ export function QueueDetailPanel({ item, onCommit, onClose }: QueueDetailPanelPr
   const [error, setError] = useState<string | null>(null);
   const [committing, setCommitting] = useState(false);
   const [rationale, setRationale] = useState("");
+  /** Tags persisted from past reviews of this same event. Read-only. */
+  const [persistedTags, setPersistedTags] = useState<PersistedReviewerTag[]>([]);
+  /** Tags the reviewer is staging during THIS review session. Sent on commit. */
+  const [stagedTags, setStagedTags] = useState<ReviewerTag[]>([]);
+  const [tagCatalog, setTagCatalog] = useState<TagCatalogEntry[]>([]);
   const openedAt = useRef(Date.now());
 
   useEffect(() => {
@@ -45,6 +60,8 @@ export function QueueDetailPanel({ item, onCommit, onClose }: QueueDetailPanelPr
     setError(null);
     setDetail(null);
     setRationale("");
+    setStagedTags([]);
+    setPersistedTags([]);
     openedAt.current = Date.now();
     getEventDetail(item.contentEventId)
       .then((d) => {
@@ -56,6 +73,13 @@ export function QueueDetailPanel({ item, onCommit, onClose }: QueueDetailPanelPr
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+    // Tag catalog (cached after first load) + persisted tags for this event.
+    getTagCatalog()
+      .then((c) => !cancelled && setTagCatalog(c))
+      .catch(() => {});
+    listReviewerTagsForEvent(item.contentEventId)
+      .then((t) => !cancelled && setPersistedTags(t))
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -71,6 +95,7 @@ export function QueueDetailPanel({ item, onCommit, onClose }: QueueDetailPanelPr
         verdict,
         rationale: rationale.trim() || undefined,
         durationMs: Math.max(1, Date.now() - openedAt.current),
+        reviewerTags: stagedTags,
       });
       await onCommit();
     } catch (err) {
@@ -78,6 +103,23 @@ export function QueueDetailPanel({ item, onCommit, onClose }: QueueDetailPanelPr
     } finally {
       setCommitting(false);
     }
+  };
+
+  const tagsByCatalog = useMemo(
+    () => new Map(tagCatalog.map((c) => [c.tagId, c])),
+    [tagCatalog],
+  );
+
+  const eventModalities = detail?.event.modalities ?? ["text"];
+
+  const handlePickTag = (tag: ReviewerTag) => {
+    setStagedTags((prev) =>
+      prev.some((t) => t.tagId === tag.tagId) ? prev : [...prev, tag],
+    );
+  };
+
+  const handleUnstageTag = (tagId: string) => {
+    setStagedTags((prev) => prev.filter((t) => t.tagId !== tagId));
   };
 
   const decided = item.state === "decided";
@@ -144,13 +186,44 @@ export function QueueDetailPanel({ item, onCommit, onClose }: QueueDetailPanelPr
             {error}
           </div>
         )}
-        {detail && !loading && <DetailBody detail={detail} />}
+        {detail && !loading && (
+          <DetailBody
+            detail={detail}
+            persistedTags={persistedTags}
+            stagedTags={stagedTags}
+            tagsByCatalog={tagsByCatalog}
+            eventModalities={eventModalities}
+            decided={decided}
+            onPickTag={handlePickTag}
+            onUnstageTag={handleUnstageTag}
+          />
+        )}
       </div>
     </Card>
   );
 }
 
-function DetailBody({ detail }: { detail: EventDetail }) {
+interface DetailBodyProps {
+  detail: EventDetail;
+  persistedTags: PersistedReviewerTag[];
+  stagedTags: ReviewerTag[];
+  tagsByCatalog: Map<string, TagCatalogEntry>;
+  eventModalities: readonly EventDetail["event"]["modalities"][number][];
+  decided: boolean;
+  onPickTag: (tag: ReviewerTag) => void;
+  onUnstageTag: (tagId: string) => void;
+}
+
+function DetailBody({
+  detail,
+  persistedTags,
+  stagedTags,
+  tagsByCatalog,
+  eventModalities,
+  decided,
+  onPickTag,
+  onUnstageTag,
+}: DetailBodyProps) {
   const { event, signal, traces } = detail;
   const overlaysByMedia = useMemo(() => buildOverlayMap(signal), [signal]);
 
@@ -226,6 +299,16 @@ function DetailBody({ detail }: { detail: EventDetail }) {
           )}
         </div>
       )}
+
+      <ReviewerTagsSection
+        persisted={persistedTags}
+        staged={stagedTags}
+        tagsByCatalog={tagsByCatalog}
+        eventModalities={eventModalities}
+        decided={decided}
+        onPickTag={onPickTag}
+        onUnstageTag={onUnstageTag}
+      />
 
       {detail.authorHistory && detail.authorHistory.recent.length > 0 && (
         <AuthorHistorySection history={detail.authorHistory} />
@@ -333,6 +416,130 @@ function buildOverlayMap(signal: StructuredSignal | null): Map<string, BboxOverl
     }
   }
   return map;
+}
+
+function ReviewerTagsSection({
+  persisted,
+  staged,
+  tagsByCatalog,
+  eventModalities,
+  decided,
+  onPickTag,
+  onUnstageTag,
+}: {
+  persisted: PersistedReviewerTag[];
+  staged: ReviewerTag[];
+  tagsByCatalog: Map<string, TagCatalogEntry>;
+  eventModalities: readonly EventDetail["event"]["modalities"][number][];
+  decided: boolean;
+  onPickTag: (tag: ReviewerTag) => void;
+  onUnstageTag: (tagId: string) => void;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <Tag className="h-3 w-3 text-muted-foreground" strokeWidth={1.75} />
+          <SectionLabel>Reviewer tags</SectionLabel>
+          <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+            {persisted.length + staged.length}
+          </span>
+        </div>
+        {!decided && (
+          <ReviewerTagPicker
+            eventModalities={eventModalities}
+            staged={[
+              ...staged,
+              ...persisted.map((p) => ({ tagId: p.tagId, scope: p.scope, note: p.note })),
+            ]}
+            onPick={onPickTag}
+          />
+        )}
+      </div>
+
+      {persisted.length === 0 && staged.length === 0 ? (
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          no tags yet — use Add tag to label this event for the reviewer corpus
+        </p>
+      ) : (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {persisted.map((p) => (
+            <TagChip
+              key={p.id}
+              entry={tagsByCatalog.get(p.tagId)}
+              fallbackId={p.tagId}
+              persisted
+              note={p.note}
+            />
+          ))}
+          {staged.map((t) => (
+            <TagChip
+              key={`staged-${t.tagId}`}
+              entry={tagsByCatalog.get(t.tagId)}
+              fallbackId={t.tagId}
+              note={t.note}
+              onRemove={!decided ? () => onUnstageTag(t.tagId) : undefined}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TagChip({
+  entry,
+  fallbackId,
+  note,
+  persisted,
+  onRemove,
+}: {
+  entry: TagCatalogEntry | undefined;
+  fallbackId: string;
+  note?: string;
+  persisted?: boolean;
+  onRemove?: () => void;
+}) {
+  const tone = entry
+    ? {
+        danger: "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300",
+        warn: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+        info: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300",
+        neutral: "border-border bg-muted/40 text-muted-foreground",
+      }[entry.severity]
+    : "border-border bg-muted/40 text-muted-foreground";
+  const label = entry?.displayName ?? fallbackId;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-[11px]",
+        tone,
+        persisted && "ring-1 ring-inset ring-foreground/5",
+      )}
+      title={note ? `${fallbackId} — ${note}` : fallbackId}
+    >
+      <span className="font-mono">{label}</span>
+      {persisted ? (
+        <span className="font-mono text-[9px] uppercase tracking-wider opacity-70">
+          saved
+        </span>
+      ) : (
+        <span className="font-mono text-[9px] uppercase tracking-wider opacity-70">
+          staged
+        </span>
+      )}
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`Remove tag ${label}`}
+          className="ml-0.5 inline-flex h-3 w-3 items-center justify-center rounded text-current opacity-60 transition-opacity hover:opacity-100"
+        >
+          <CloseIcon className="h-2.5 w-2.5" strokeWidth={2} />
+        </button>
+      )}
+    </span>
+  );
 }
 
 function AuthorHistorySection({

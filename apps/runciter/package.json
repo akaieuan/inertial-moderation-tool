@@ -21,6 +21,7 @@
     "@inertial/agents-vision": "workspace:*",
     "@inertial/agents-cloud": "workspace:*",
     "@inertial/agents-context": "workspace:*",
+    "@inertial/eval": "workspace:*",
     "hono": "^4.6.14",
     "@hono/node-server": "^1.13.7"
   },

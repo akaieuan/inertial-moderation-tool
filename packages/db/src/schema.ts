@@ -90,6 +90,8 @@ export const auditKindEnum = pgEnum("audit_kind", [
   "action-dispatched",
   "policy-updated",
   "reviewer-overridden",
+  "eval-run-started",
+  "eval-run-completed",
 ]);
 
 export const auditRefTypeEnum = pgEnum("audit_ref_type", [
@@ -97,6 +99,7 @@ export const auditRefTypeEnum = pgEnum("audit_ref_type", [
   "signal",
   "review-item",
   "policy",
+  "eval-run",
 ]);
 
 export const embeddingKindEnum = pgEnum("embedding_kind", [
@@ -105,6 +108,17 @@ export const embeddingKindEnum = pgEnum("embedding_kind", [
   "video",
   "audio",
   "multimodal",
+]);
+
+export const goldEventSourceEnum = pgEnum("gold_event_source", [
+  "hand-labeled",
+  "reviewer-derived",
+]);
+
+export const evalRunStatusEnum = pgEnum("eval_run_status", [
+  "running",
+  "completed",
+  "failed",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -431,5 +445,155 @@ export const eventEmbeddings = pgTable(
     index("idx_embeddings_instance").on(t.instanceId),
     // HNSW index for cosine similarity. Created in the migration manually
     // since drizzle-kit doesn't yet emit `USING hnsw`.
+  ],
+);
+
+/**
+ * Gold-set entries — known-good (event, expected channels) pairs used to
+ * score skill calibration. Two sources:
+ *  - hand-labeled: written by an operator under config/evals/, loaded at boot
+ *  - reviewer-derived: auto-promoted from a ReviewDecision.signalFeedback
+ *
+ * The (event, source) uniqueness lets a single content event have one
+ * hand-labeled AND one reviewer-derived label without conflict — different
+ * sources may legitimately disagree.
+ */
+export const goldEvents = pgTable(
+  "gold_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    contentEventId: uuid("content_event_id")
+      .notNull()
+      .references(() => contentEvents.id, { onDelete: "cascade" }),
+    instanceId: text("instance_id").notNull(),
+    /** channel name → { probability, confidence }. Absence = expected to NOT fire. */
+    expectedChannels: jsonb("expected_channels")
+      .$type<
+        Record<
+          string,
+          { probability: number; confidence: "high" | "medium" | "low" }
+        >
+      >()
+      .notNull(),
+    /** Optional — what routing action the policy should produce. */
+    expectedAction: jsonb("expected_action").$type<PolicyAction | null>(),
+    source: goldEventSourceEnum("source").notNull(),
+    /** Operator handle (hand-labeled) or reviewerId (reviewer-derived). */
+    authorId: text("author_id").notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("idx_gold_events_instance").on(t.instanceId),
+    uniqueIndex("uq_gold_events_event_source").on(t.contentEventId, t.source),
+  ],
+);
+
+/**
+ * One row per evaluation run. A run feeds the gold set through the live
+ * skill registry, scores results, and persists per-(skill, channel)
+ * calibrations.
+ *
+ * `status` lets the dashboard show in-progress runs ("12/50 done…").
+ * `triggeredBy` distinguishes operator-kicked runs from CI / system runs.
+ */
+export const evalRuns = pgTable(
+  "eval_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    instanceId: text("instance_id").notNull(),
+    /** Free-form version label — bump when channel set or policy changes. */
+    goldSetVersion: text("gold_set_version").notNull(),
+    goldSetSize: integer("gold_set_size").notNull(),
+    status: evalRunStatusEnum("status").notNull(),
+    /** Per-event mean wall-clock latency. Filled when status = completed. */
+    meanLatencyMs: integer("mean_latency_ms"),
+    startedAt: timestamp("started_at", { withTimezone: true, mode: "string" }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true, mode: "string" }),
+    triggeredBy: text("triggered_by"),
+  },
+  (t) => [
+    index("idx_eval_runs_instance").on(t.instanceId),
+    index("idx_eval_runs_started").on(t.startedAt),
+  ],
+);
+
+/**
+ * Reviewer-applied structured tags. One row per (decision, tagId, scope) —
+ * a single decision often has multiple tags (e.g. "video.visual-benign" +
+ * "audio.harassment" on the same multimodal post).
+ *
+ * Tag scope (modality / mediaAssetId / segment / span) lives in JSONB so we
+ * can extend the scope vocabulary without a schema change.
+ *
+ * Cascades on review_decision delete: tags don't outlive their decision.
+ */
+export const reviewerTags = pgTable(
+  "reviewer_tags",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Denormalized from the parent decision for fast per-event queries. */
+    contentEventId: uuid("content_event_id")
+      .notNull()
+      .references(() => contentEvents.id, { onDelete: "cascade" }),
+    reviewDecisionId: uuid("review_decision_id")
+      .notNull()
+      .references(() => reviewDecisions.id, { onDelete: "cascade" }),
+    instanceId: text("instance_id").notNull(),
+    /** FK into TAG_CATALOG. String not enum so adding tags doesn't migrate. */
+    tagId: text("tag_id").notNull(),
+    /** ReviewerTag.scope shape (modality / asset / segment / span). */
+    scope: jsonb("scope").$type<{
+      modality?: string;
+      mediaAssetId?: string;
+      segment?: { startSec: number; endSec: number };
+      span?: { start: number; end: number };
+    } | null>(),
+    note: text("note"),
+    /** Operator handle of whoever applied the tag. */
+    reviewerId: text("reviewer_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "string" })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("idx_reviewer_tags_event").on(t.contentEventId),
+    index("idx_reviewer_tags_instance_tag").on(t.instanceId, t.tagId),
+    index("idx_reviewer_tags_decision").on(t.reviewDecisionId),
+  ],
+);
+
+/**
+ * Per (skill, channel) calibration scores for a single eval run. The unit of
+ * measurement is the skill's output, not the agent that called it — an agent
+ * composing several skills produces multiple rows here.
+ *
+ * Cascades on eval_run delete: if a run is purged, its calibrations go with it.
+ */
+export const skillCalibrations = pgTable(
+  "skill_calibrations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    evalRunId: uuid("eval_run_id")
+      .notNull()
+      .references(() => evalRuns.id, { onDelete: "cascade" }),
+    skillName: text("skill_name").notNull(),
+    channelName: text("channel_name").notNull(),
+    /** All scoring fields are numeric for precision; cast to number on read. */
+    brierScore: numeric("brier_score", { precision: 6, scale: 4 }).notNull(),
+    ece: numeric("ece", { precision: 6, scale: 4 }).notNull(),
+    agreement: numeric("agreement", { precision: 5, scale: 4 }).notNull(),
+    samples: integer("samples").notNull(),
+    meanPredicted: numeric("mean_predicted", { precision: 5, scale: 4 }).notNull(),
+    meanActual: numeric("mean_actual", { precision: 5, scale: 4 }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_skill_cal_run_skill_channel").on(
+      t.evalRunId,
+      t.skillName,
+      t.channelName,
+    ),
   ],
 );

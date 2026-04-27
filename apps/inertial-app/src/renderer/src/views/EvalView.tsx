@@ -1,13 +1,15 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
-  ArrowRight,
   BarChart3,
-  Download,
+  Loader2,
+  PlayCircle,
   ScanSearch,
   Sparkles,
+  Tag,
   Target,
 } from "lucide-react";
+import { toast } from "sonner";
 import {
   Card,
   CardContent,
@@ -17,106 +19,239 @@ import {
 } from "../components/ui/card.js";
 import { Button } from "../components/ui/button.js";
 import { Badge } from "../components/ui/badge.js";
+import { Skeleton } from "../components/ui/skeleton.js";
 import { PageHeader } from "../components/PageHeader.js";
 import { Stat } from "../components/Stat.js";
+import {
+  getEvalRun,
+  getLatestEvalRun,
+  getTagCatalog,
+  getTagFrequencies,
+  listEvalRuns,
+  startEvalRun,
+  type EvalRun,
+  type TagCatalogEntry,
+  type TagFrequencyRow,
+} from "../lib/api.js";
 import { cn } from "../lib/utils.js";
 
-const SPARK_TEXT = [0.31, 0.34, 0.38, 0.42, 0.39, 0.44, 0.48, 0.51, 0.56, 0.6, 0.62, 0.66];
-const SPARK_AGGREGATE = [0.18, 0.2, 0.22, 0.24, 0.22, 0.25, 0.27, 0.28, 0.31, 0.34, 0.34, 0.36];
+const INSTANCE = "default";
+const POLL_MS = 750;
+const POLL_BACKOFF_AFTER = 8;
+const POLL_BACKOFF_MS = 2_000;
+const POLL_TIMEOUT_MS = 90_000;
 
-interface AgentRow {
-  agent: string;
-  brier: number | null;
-  ece: number | null;
-  runs: number;
-  trend?: number[];
+interface AggregatedSkillRow {
+  skillName: string;
+  brierMean: number;
+  eceMean: number;
+  agreementMean: number;
+  samplesTotal: number;
+  channels: number;
 }
 
-const AGENT_BRIER: AgentRow[] = [
-  { agent: "text-agent", brier: 0.118, ece: 0.041, runs: 824, trend: SPARK_TEXT },
-  { agent: "vision-agent", brier: null, ece: null, runs: 0 },
-  { agent: "video-agent", brier: null, ece: null, runs: 0 },
-  { agent: "audio-agent", brier: null, ece: null, runs: 0 },
-  {
-    agent: "identity-agent",
-    brier: 0.221,
-    ece: 0.087,
-    runs: 412,
-    trend: [0.27, 0.26, 0.24, 0.25, 0.24, 0.23, 0.23, 0.22, 0.22, 0.22, 0.22, 0.221],
-  },
-  {
-    agent: "context-agent",
-    brier: 0.198,
-    ece: 0.073,
-    runs: 412,
-    trend: [0.24, 0.23, 0.22, 0.22, 0.21, 0.21, 0.2, 0.2, 0.2, 0.2, 0.2, 0.198],
-  },
-];
-
-const CHANNELS: Array<{ name: string; tone: "good" | "warn" | "danger" | "info" | "muted" }> = [
-  { name: "spam-link-presence", tone: "good" },
-  { name: "nsfw", tone: "warn" },
-  { name: "minor-adjacent", tone: "danger" },
-  { name: "brigading", tone: "info" },
-  { name: "pii-redaction", tone: "muted" },
-];
-
-const CHANNEL_TONE: Record<string, string> = {
-  good: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-  warn: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
-  danger: "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300",
-  info: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300",
-  muted: "border-border bg-muted/30 text-muted-foreground",
-};
-
 export function EvalView() {
-  const goldCoverage = 0.43;
+  const [latest, setLatest] = useState<EvalRun | null | "loading">("loading");
+  const [history, setHistory] = useState<EvalRun[] | "loading">("loading");
+  const [tagCatalog, setTagCatalog] = useState<TagCatalogEntry[] | "loading">("loading");
+  const [tagStats, setTagStats] = useState<{ frequencies: TagFrequencyRow[]; total: number } | "loading">("loading");
+  const [running, setRunning] = useState<{ runId: string; progressLabel: string } | null>(null);
+  const stopPollRef = useRef<{ stop: boolean }>({ stop: false });
+
+  useEffect(() => {
+    stopPollRef.current = { stop: false };
+    void Promise.all([
+      getLatestEvalRun(INSTANCE).catch(() => null).then(setLatest),
+      listEvalRuns(INSTANCE).catch(() => []).then(setHistory),
+      getTagCatalog().catch(() => []).then(setTagCatalog),
+      getTagFrequencies(INSTANCE)
+        .catch(() => ({ frequencies: [], total: 0 }))
+        .then(setTagStats),
+    ]);
+    return () => {
+      stopPollRef.current.stop = true;
+    };
+  }, []);
+
+  // Aggregate per-(skill, channel) calibration into one row per skill for the
+  // primary table; the channel breakdown shows on hover.
+  const aggregated = useMemo<AggregatedSkillRow[]>(() => {
+    if (latest === "loading" || latest === null) return [];
+    const groups = new Map<string, AggregatedSkillRow>();
+    for (const c of latest.skillCalibrations) {
+      const existing = groups.get(c.skillName);
+      if (existing) {
+        const n = existing.channels + 1;
+        existing.brierMean = (existing.brierMean * existing.channels + c.brierScore) / n;
+        existing.eceMean = (existing.eceMean * existing.channels + c.ece) / n;
+        existing.agreementMean = (existing.agreementMean * existing.channels + c.agreement) / n;
+        existing.samplesTotal += c.samples;
+        existing.channels = n;
+      } else {
+        groups.set(c.skillName, {
+          skillName: c.skillName,
+          brierMean: c.brierScore,
+          eceMean: c.ece,
+          agreementMean: c.agreement,
+          samplesTotal: c.samples,
+          channels: 1,
+        });
+      }
+    }
+    return Array.from(groups.values()).sort((a, b) => a.brierMean - b.brierMean);
+  }, [latest]);
+
+  const headlineStat = useMemo(() => {
+    if (latest === "loading" || latest === null) {
+      return { brier: null as number | null, agreement: null as number | null };
+    }
+    const cals = latest.skillCalibrations;
+    if (cals.length === 0) return { brier: null, agreement: null };
+    const brier = cals.reduce((acc, c) => acc + c.brierScore, 0) / cals.length;
+    const agreement = cals.reduce((acc, c) => acc + c.agreement, 0) / cals.length;
+    return { brier, agreement };
+  }, [latest]);
+
+  const tagCoverage = useMemo(() => {
+    if (tagStats === "loading" || tagCatalog === "loading") {
+      return { covered: 0, total: 0 };
+    }
+    const used = new Set(tagStats.frequencies.map((f) => f.tagId));
+    return { covered: used.size, total: tagCatalog.length };
+  }, [tagStats, tagCatalog]);
+
+  const handleRunEval = async () => {
+    if (running) return;
+    try {
+      const { runId } = await startEvalRun({ instanceId: INSTANCE, triggeredBy: "dashboard" });
+      setRunning({ runId, progressLabel: "starting…" });
+      await pollUntilDone(runId);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+      setRunning(null);
+    }
+  };
+
+  const pollUntilDone = async (runId: string) => {
+    const start = Date.now();
+    let polls = 0;
+    while (!stopPollRef.current.stop) {
+      polls += 1;
+      const interval = polls > POLL_BACKOFF_AFTER ? POLL_BACKOFF_MS : POLL_MS;
+      await new Promise((r) => setTimeout(r, interval));
+      const run = await getEvalRun(runId).catch(() => null);
+      if (!run) {
+        setRunning((prev) =>
+          prev ? { ...prev, progressLabel: "waiting on runciter…" } : prev,
+        );
+        continue;
+      }
+      if (run.status === "completed") {
+        setLatest(run);
+        // Refresh the history table too — the new run goes on top.
+        listEvalRuns(INSTANCE).catch(() => []).then(setHistory);
+        toast.success(
+          `Eval complete · ${run.skillCalibrations.length} (skill, channel) row(s)`,
+        );
+        setRunning(null);
+        return;
+      }
+      if (run.status === "failed") {
+        toast.error("Eval run failed — check runciter logs");
+        setRunning(null);
+        return;
+      }
+      setRunning({ runId, progressLabel: "running…" });
+      if (Date.now() - start > POLL_TIMEOUT_MS) {
+        toast.error("Eval run timed out — still running on the runciter");
+        setRunning(null);
+        return;
+      }
+    }
+  };
 
   return (
     <div className="flex flex-col gap-8">
       <PageHeader
         title="Insights"
-        description="Calibration, agreement, and drift across inertials over the last 7 days."
+        description="Calibration + reviewer-tagged corpus per inertial. Run the gold set against the live skill registry to refresh."
         actions={
-          <Button size="sm" variant="outline">
-            <Download className="mr-1.5 h-3.5 w-3.5" />
-            Export run
+          <Button size="sm" onClick={handleRunEval} disabled={!!running}>
+            {running ? (
+              <>
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                {running.progressLabel}
+              </>
+            ) : (
+              <>
+                <PlayCircle className="mr-1.5 h-3.5 w-3.5" />
+                Run eval
+              </>
+            )}
           </Button>
         }
       />
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat
-          label="Events processed (7d)"
-          value="12,438"
-          hint="+18.4% wow"
+          label="Latest run"
+          value={
+            latest === "loading"
+              ? "—"
+              : latest === null
+                ? "no runs yet"
+                : new Date(latest.startedAt).toLocaleDateString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                    hour: "numeric",
+                    minute: "2-digit",
+                  })
+          }
+          hint={latest && latest !== "loading" ? `${latest.goldSetSize} gold events` : undefined}
           icon={<Activity className="h-3 w-3" />}
-          delta={{ value: 18.4, suffix: "%" }}
-          tone="info"
         />
         <Stat
-          label="Avg agent latency"
-          value="284 ms"
-          hint="p95 612 ms"
-          icon={<BarChart3 className="h-3 w-3" />}
-          delta={{ value: -12, suffix: " ms" }}
-          tone="good"
-        />
-        <Stat
-          label="Calibration (Brier)"
-          value="0.146"
-          hint="text-agent · 824 runs"
+          label="Mean Brier"
+          value={headlineStat.brier === null ? "—" : headlineStat.brier.toFixed(3)}
+          hint={
+            latest === "loading" || latest === null
+              ? undefined
+              : `across ${latest.skillCalibrations.length} (skill, channel) rows`
+          }
           icon={<Target className="h-3 w-3" />}
-          delta={{ value: -0.012 }}
-          tone="good"
+          tone={
+            headlineStat.brier === null
+              ? "default"
+              : headlineStat.brier < 0.1
+                ? "good"
+                : headlineStat.brier < 0.2
+                  ? "warn"
+                  : "danger"
+          }
         />
         <Stat
-          label="Reviewer agreement"
-          value="91.2%"
-          hint="signalFeedback.agreed"
+          label="Mean agreement"
+          value={
+            headlineStat.agreement === null
+              ? "—"
+              : `${(headlineStat.agreement * 100).toFixed(1)}%`
+          }
+          hint="threshold ≥ 0.5"
           icon={<Sparkles className="h-3 w-3" />}
-          delta={{ value: 1.1, suffix: "%" }}
-          tone="good"
+          tone={headlineStat.agreement === null ? "default" : "good"}
+        />
+        <Stat
+          label="Tag corpus"
+          value={
+            tagStats === "loading" ? "—" : (tagStats.total ?? 0).toLocaleString()
+          }
+          hint={
+            tagStats === "loading"
+              ? undefined
+              : `${tagCoverage.covered}/${tagCoverage.total} catalog entries used`
+          }
+          icon={<Tag className="h-3 w-3" />}
+          tone="info"
         />
       </section>
 
@@ -126,185 +261,208 @@ export function EvalView() {
             <div>
               <CardTitle className="flex items-center gap-2 text-base font-medium">
                 <BarChart3 className="h-4 w-4" />
-                Per-agent calibration
+                Per-skill calibration
               </CardTitle>
-              <CardDescription>Brier + ECE per inertial · latest run.</CardDescription>
+              <CardDescription>
+                Brier + ECE + agreement averaged across emitted channels for the latest run.
+              </CardDescription>
             </div>
             <Badge variant="outline" className="text-[10px] uppercase tracking-wider">
-              latest
+              {latest === "loading" || latest === null ? "—" : "latest"}
             </Badge>
           </CardHeader>
           <CardContent className="px-5">
+            {latest === "loading" ? (
+              <div className="space-y-2">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton key={i} className="h-8 w-full" />
+                ))}
+              </div>
+            ) : latest === null ? (
+              <EmptyState
+                title="No eval runs yet"
+                hint="Click 'Run eval' to score the live skill registry against the gold set."
+              />
+            ) : (
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                    <th className="pb-2 text-left font-medium">Skill</th>
+                    <th className="pb-2 text-right font-medium">Brier</th>
+                    <th className="pb-2 text-right font-medium">ECE</th>
+                    <th className="pb-2 text-right font-medium">Agreement</th>
+                    <th className="pb-2 text-right font-medium">Samples</th>
+                    <th className="pb-2 pr-1 text-right font-medium">Channels</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {aggregated.map((row) => (
+                    <tr key={row.skillName} className="border-t border-border/60 first:border-t-0">
+                      <td className="py-2.5 font-mono text-xs">{row.skillName}</td>
+                      <td className="py-2.5 text-right tabular-nums">{row.brierMean.toFixed(3)}</td>
+                      <td className="py-2.5 text-right tabular-nums text-muted-foreground">{row.eceMean.toFixed(3)}</td>
+                      <td className="py-2.5 text-right tabular-nums text-muted-foreground">{(row.agreementMean * 100).toFixed(0)}%</td>
+                      <td className="py-2.5 text-right tabular-nums text-muted-foreground">{row.samplesTotal}</td>
+                      <td className="py-2.5 pr-1 text-right tabular-nums text-muted-foreground">{row.channels}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="gap-4 py-5">
+          <CardHeader className="px-5 pb-0">
+            <CardTitle className="flex items-center gap-2 text-base font-medium">
+              <Tag className="h-4 w-4" />
+              Tag corpus
+            </CardTitle>
+            <CardDescription>
+              Top reviewer-applied tags across this instance. Grows on every commit.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="px-5">
+            {tagStats === "loading" || tagCatalog === "loading" ? (
+              <div className="space-y-2">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <Skeleton key={i} className="h-6 w-full" />
+                ))}
+              </div>
+            ) : tagStats.total === 0 ? (
+              <EmptyState
+                title="No reviewer tags yet"
+                hint="Open a queue item, click 'Add tag', and the corpus starts here."
+              />
+            ) : (
+              <TagFrequencyList
+                frequencies={tagStats.frequencies.slice(0, 8)}
+                catalog={tagCatalog}
+                total={tagStats.total}
+              />
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
+      <Card className="gap-4 py-5">
+        <CardHeader className="px-5 pb-0">
+          <CardTitle className="flex items-center gap-2 text-base font-medium">
+            <ScanSearch className="h-4 w-4" />
+            Eval runs history
+          </CardTitle>
+          <CardDescription>Recent runs against this instance. Older first.</CardDescription>
+        </CardHeader>
+        <CardContent className="px-5">
+          {history === "loading" ? (
+            <Skeleton className="h-24 w-full" />
+          ) : history.length === 0 ? (
+            <EmptyState title="No history" hint="Eval runs will appear here once you run one." />
+          ) : (
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                  <th className="pb-2 text-left font-medium">Agent</th>
-                  <th className="pb-2 text-right font-medium">Brier</th>
-                  <th className="pb-2 text-right font-medium">ECE</th>
-                  <th className="pb-2 text-right font-medium">Runs</th>
-                  <th className="pb-2 pr-1 text-right font-medium">Trend</th>
+                  <th className="pb-2 text-left font-medium">When</th>
+                  <th className="pb-2 text-left font-medium">Version</th>
+                  <th className="pb-2 text-right font-medium">Events</th>
+                  <th className="pb-2 text-right font-medium">Mean Brier</th>
+                  <th className="pb-2 text-right font-medium">Latency</th>
+                  <th className="pb-2 pr-1 text-right font-medium">Triggered by</th>
                 </tr>
               </thead>
               <tbody>
-                {AGENT_BRIER.map((row) => (
-                  <tr
-                    key={row.agent}
-                    className="border-t border-border/60 first:border-t-0"
-                  >
-                    <td className="py-2.5 font-mono text-xs">{row.agent}</td>
-                    <td className="py-2.5 text-right tabular-nums">
-                      {row.brier === null ? (
-                        <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70">
-                          no data
-                        </span>
-                      ) : (
-                        row.brier.toFixed(3)
-                      )}
-                    </td>
-                    <td className="py-2.5 text-right tabular-nums text-muted-foreground">
-                      {row.ece === null ? "—" : row.ece.toFixed(3)}
-                    </td>
-                    <td className="py-2.5 text-right tabular-nums text-muted-foreground">
-                      {row.runs || "—"}
-                    </td>
-                    <td className="py-2.5 pr-1 text-right">
-                      {row.trend ? (
-                        <div className="ml-auto inline-block">
-                          <BarSparkline values={row.trend} />
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground/60">—</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {history.map((run) => {
+                  const meanBrier =
+                    run.skillCalibrations.length === 0
+                      ? null
+                      : run.skillCalibrations.reduce((acc, c) => acc + c.brierScore, 0) /
+                        run.skillCalibrations.length;
+                  return (
+                    <tr key={run.id} className="border-t border-border/60 first:border-t-0">
+                      <td className="py-2.5 text-xs text-muted-foreground">
+                        {new Date(run.startedAt).toLocaleString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}
+                      </td>
+                      <td className="py-2.5 font-mono text-xs">{run.goldSetVersion}</td>
+                      <td className="py-2.5 text-right tabular-nums text-muted-foreground">{run.goldSetSize}</td>
+                      <td className="py-2.5 text-right tabular-nums">
+                        {meanBrier === null ? "—" : meanBrier.toFixed(3)}
+                      </td>
+                      <td className="py-2.5 text-right tabular-nums text-muted-foreground">
+                        {run.meanLatencyMs ? `${run.meanLatencyMs}ms` : "—"}
+                      </td>
+                      <td className="py-2.5 pr-1 text-right text-muted-foreground">
+                        {run.triggeredBy ?? "system"}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
-          </CardContent>
-        </Card>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
 
-        <Card className="gap-4 py-5">
-          <CardHeader className="px-5 pb-0">
-            <CardTitle className="flex items-center gap-2 text-base font-medium">
-              <Target className="h-4 w-4" />
-              Gold-set coverage
-            </CardTitle>
-            <CardDescription>Channels with eval gold sets.</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col items-center gap-3 px-5 py-2">
-            <CoverageRing value={goldCoverage} />
-            <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
-              43 / 100 channels have gold-set entries. Add more under{" "}
-              <code className="font-mono text-foreground/80">config/evals/</code>.
-            </p>
-          </CardContent>
-        </Card>
-      </section>
-
-      <section className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <Card className="gap-4 py-5">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 px-5 pb-0">
-            <div>
-              <CardTitle className="flex items-center gap-2 text-base font-medium">
-                <ScanSearch className="h-4 w-4" />
-                Recent regressions
-              </CardTitle>
-              <CardDescription>
-                Step-level diffs across two scored runs.
-              </CardDescription>
-            </div>
-            <Button variant="ghost" size="sm" disabled>
-              Compare
-              <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
-            </Button>
-          </CardHeader>
-          <CardContent className="px-5">
-            <div className="flex items-center gap-3 rounded-md border border-dashed border-border bg-muted/20 p-4">
-              <span className="text-muted-foreground">
-                <Sparkles className="h-5 w-5" />
+function TagFrequencyList({
+  frequencies,
+  catalog,
+  total,
+}: {
+  frequencies: TagFrequencyRow[];
+  catalog: TagCatalogEntry[];
+  total: number;
+}) {
+  const max = Math.max(...frequencies.map((f) => f.count), 1);
+  const byTagId = new Map(catalog.map((e) => [e.tagId, e]));
+  return (
+    <ul className="flex flex-col gap-2">
+      {frequencies.map((f) => {
+        const entry = byTagId.get(f.tagId);
+        const pct = (f.count / max) * 100;
+        const sharePct = ((f.count / total) * 100).toFixed(1);
+        return (
+          <li key={f.tagId} className="flex flex-col gap-1">
+            <div className="flex items-baseline justify-between gap-2 text-[12px]">
+              <span className="truncate font-mono">{entry?.displayName ?? f.tagId}</span>
+              <span className="font-mono tabular-nums text-muted-foreground">
+                {f.count} <span className="text-muted-foreground/60">({sharePct}%)</span>
               </span>
-              <div>
-                <div className="text-sm font-medium">No regressions detected</div>
-                <div className="text-xs text-muted-foreground">
-                  Wire <span className="font-mono">@eval-kit/core</span>'s parseScoredRun to enable.
-                </div>
-              </div>
             </div>
-          </CardContent>
-        </Card>
-
-        <Card className="gap-4 py-5">
-          <CardHeader className="px-5 pb-0">
-            <CardTitle className="flex items-center gap-2 text-base font-medium">
-              <Activity className="h-4 w-4" />
-              Live signal channels
-            </CardTitle>
-            <CardDescription>Channels currently emitting.</CardDescription>
-          </CardHeader>
-          <CardContent className="px-5">
-            <ul className="flex flex-wrap gap-1.5">
-              {CHANNELS.map((c) => (
-                <li key={c.name}>
-                  <span
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[11px]",
-                      CHANNEL_TONE[c.tone],
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "h-1.5 w-1.5 rounded-full",
-                        c.tone === "good" && "bg-emerald-500",
-                        c.tone === "warn" && "bg-amber-500",
-                        c.tone === "danger" && "bg-rose-500",
-                        c.tone === "info" && "bg-sky-500",
-                        c.tone === "muted" && "bg-muted-foreground/50",
-                      )}
-                    />
-                    {c.name}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      </section>
-    </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+              <div
+                className={cn(
+                  "h-full",
+                  entry?.severity === "danger" && "bg-rose-500/80",
+                  entry?.severity === "warn" && "bg-amber-500/80",
+                  entry?.severity === "info" && "bg-sky-500/80",
+                  (!entry || entry.severity === "neutral") && "bg-muted-foreground/60",
+                )}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
-function BarSparkline({ values }: { values: number[] }) {
-  const max = useMemo(() => Math.max(...values, 0.01), [values]);
+function EmptyState({ title, hint }: { title: string; hint: string }) {
   return (
-    <div className="flex h-4 items-end gap-[2px]">
-      {values.map((v, i) => (
-        <span
-          key={i}
-          className="w-[3px] rounded-sm bg-foreground/40"
-          style={{ height: `${Math.max(10, (v / max) * 100)}%` }}
-        />
-      ))}
-    </div>
-  );
-}
-
-function CoverageRing({ value }: { value: number }) {
-  const pct = Math.round(value * 100);
-  return (
-    <div className="relative h-[120px] w-[120px]">
-      <div
-        className="absolute inset-0 rounded-full"
-        style={{
-          background: `conic-gradient(var(--accent-emerald) ${pct}%, var(--border) ${pct}% 100%)`,
-        }}
-      />
-      <div className="absolute inset-[10px] flex items-center justify-center rounded-full bg-card">
-        <div className="text-center">
-          <div className="text-2xl font-light tabular-nums leading-none">{pct}%</div>
-          <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-            covered
-          </div>
-        </div>
+    <div className="flex items-center gap-3 rounded-md border border-dashed border-border bg-muted/20 p-4">
+      <span className="text-muted-foreground">
+        <Sparkles className="h-5 w-5" />
+      </span>
+      <div>
+        <div className="text-sm font-medium">{title}</div>
+        <div className="text-xs text-muted-foreground">{hint}</div>
       </div>
     </div>
   );

@@ -15,6 +15,27 @@
       "when": 1777299885064,
       "tag": "0001_worried_gorgon",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777310304666,
+      "tag": "0002_charming_venus",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1777310892497,
+      "tag": "0003_fuzzy_kingpin",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1777312970375,
+      "tag": "0004_pretty_psylocke",
+      "breakpoints": true
     }
   ]
 }

@@ -26,3 +26,8 @@ export * as embeddings from "./repositories/embeddings.js";
 export * as shadow from "./repositories/shadow.js";
 export type { SkillAgreement } from "./repositories/shadow.js";
 export * as skillRegistrations from "./repositories/skill-registrations.js";
+export * as goldEvents from "./repositories/gold-events.js";
+export * as evalRuns from "./repositories/eval-runs.js";
+export * as skillCalibrations from "./repositories/skill-calibrations.js";
+export * as reviewerTags from "./repositories/reviewer-tags.js";
+export type { PersistedReviewerTag } from "./repositories/reviewer-tags.js";

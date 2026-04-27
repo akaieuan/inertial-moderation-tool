@@ -17,6 +17,7 @@
     "test": "turbo run test",
     "smoke": "node scripts/smoke.mjs",
     "seed": "node scripts/seed.mjs",
+    "eval": "node scripts/eval.mjs",
     "demo:setup": "test -d apps/inertial-app/node_modules/electron/dist || node apps/inertial-app/node_modules/electron/install.js",
     "predemo": "pnpm demo:setup",
     "demo": "concurrently -n runciter,gateway,app -c cyan,green,magenta --kill-others-on-fail 'pnpm --filter @inertial/runciter dev' 'pnpm --filter @inertial/gateway dev' 'pnpm --filter @inertial/app dev'",
@@ -32,7 +33,14 @@
     "concurrently": "^9.1.2",
     "puppeteer": "^24.42.0",
     "turbo": "^2.3.3",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "@inertial/agents-cloud": "workspace:*",
+    "@inertial/agents-context": "workspace:*",
+    "@inertial/agents-text": "workspace:*",
+    "@inertial/agents-vision": "workspace:*",
+    "@inertial/core": "workspace:*",
+    "@inertial/db": "workspace:*",
+    "@inertial/eval": "workspace:*"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

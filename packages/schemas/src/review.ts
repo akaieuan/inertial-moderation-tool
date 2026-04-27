@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PolicyActionSchema } from "./policy.js";
+import { ReviewerTagSchema } from "./tag.js";
 
 /**
  * Queue type a review item is routed into.
@@ -62,6 +63,13 @@ export const ReviewDecisionSchema = z.object({
       }),
     )
     .default([]),
+  /**
+   * Structured tags the reviewer applied during the review. Distinct from
+   * `signalFeedback` — tags are new modality-scoped assertions (e.g. "the
+   * audio at 0:12-0:24 is harassment") rather than corrections to existing
+   * channel probabilities. Sourced from TAG_CATALOG in @inertial/core.
+   */
+  reviewerTags: z.array(ReviewerTagSchema).default([]),
   /**
    * AiGenerationScale value (HITL-KIT primitive) — what fraction of the
    * agent's output the reviewer felt was correct. 0 = wrong, 4 = fully correct.

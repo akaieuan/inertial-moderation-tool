@@ -2,6 +2,9 @@ import type {
   AgentTrace,
   AuditEntry,
   ContentEvent,
+  EvalRun,
+  GoldEvent,
+  ReviewerTag,
   ReviewItem,
   ReviewVerdict,
   SkillRegistration,
@@ -11,12 +14,17 @@ import { isDemoModeActive } from "./demo-mode.js";
 import {
   getDemoAudit,
   getDemoChainVerification,
+  getDemoEvalRuns,
   getDemoEventDetail,
+  getDemoLatestEvalRun,
   getDemoQueue,
+  getDemoReviewerTagsForEvent,
   getDemoShadowAgreement,
   getDemoSkillCatalog,
   getDemoSkillRegistrations,
   getDemoSkills,
+  getDemoTagCatalog,
+  getDemoTagFrequencies,
 } from "./demo-data.js";
 
 // Mirror of @inertial/core's SkillCatalogEntry shape so the renderer doesn't
@@ -114,6 +122,8 @@ export interface DecisionInput {
   verdict: ReviewVerdict;
   rationale?: string;
   durationMs: number;
+  /** Optional structured tags the reviewer applied during the review. */
+  reviewerTags?: ReviewerTag[];
 }
 
 export async function commitDecision(input: DecisionInput): Promise<void> {
@@ -128,6 +138,7 @@ export async function commitDecision(input: DecisionInput): Promise<void> {
         verdict: input.verdict,
         rationale: input.rationale,
         durationMs: input.durationMs,
+        reviewerTags: input.reviewerTags ?? [],
       }),
     },
   );
@@ -322,4 +333,140 @@ export async function deleteSkillRegistration(id: string): Promise<void> {
     method: "DELETE",
   });
   if (!res.ok) throw new Error(`deleteSkillRegistration failed: ${res.status}`);
+}
+
+// --- Eval harness ---------------------------------------------------------
+
+export type { EvalRun, GoldEvent } from "@inertial/schemas";
+
+export async function listEvalRuns(instance: string): Promise<EvalRun[]> {
+  if (isDemoModeActive()) return getDemoEvalRuns();
+  const res = await fetch(
+    `${WORKER_URL}/v1/eval/runs?instance=${encodeURIComponent(instance)}`,
+  );
+  if (!res.ok) throw new Error(`listEvalRuns failed: ${res.status}`);
+  const body = (await res.json()) as { runs: EvalRun[] };
+  return body.runs;
+}
+
+export async function getLatestEvalRun(instance: string): Promise<EvalRun | null> {
+  if (isDemoModeActive()) return getDemoLatestEvalRun();
+  const res = await fetch(
+    `${WORKER_URL}/v1/eval/runs/latest?instance=${encodeURIComponent(instance)}`,
+  );
+  if (!res.ok) throw new Error(`getLatestEvalRun failed: ${res.status}`);
+  const body = (await res.json()) as { run: EvalRun | null };
+  return body.run;
+}
+
+export async function getEvalRun(id: string): Promise<EvalRun | null> {
+  if (isDemoModeActive()) return getDemoLatestEvalRun();
+  const res = await fetch(`${WORKER_URL}/v1/eval/runs/${id}`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`getEvalRun failed: ${res.status}`);
+  const body = (await res.json()) as { run: EvalRun };
+  return body.run;
+}
+
+export async function startEvalRun(input: {
+  instanceId: string;
+  goldSetVersion?: string;
+  triggeredBy?: string;
+}): Promise<{ runId: string }> {
+  if (isDemoModeActive()) return { runId: "demo-run" };
+  const res = await fetch(`${WORKER_URL}/v1/eval/runs`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`startEvalRun failed: ${res.status} ${text}`);
+  }
+  return (await res.json()) as { runId: string };
+}
+
+export async function listGoldEvents(
+  instance: string,
+  opts: { channel?: string; source?: "hand-labeled" | "reviewer-derived" } = {},
+): Promise<GoldEvent[]> {
+  if (isDemoModeActive()) return [];
+  const params = new URLSearchParams({ instance });
+  if (opts.channel) params.set("channel", opts.channel);
+  if (opts.source) params.set("source", opts.source);
+  const res = await fetch(`${WORKER_URL}/v1/eval/gold-events?${params.toString()}`);
+  if (!res.ok) throw new Error(`listGoldEvents failed: ${res.status}`);
+  const body = (await res.json()) as { goldEvents: GoldEvent[] };
+  return body.goldEvents;
+}
+
+// --- Tag layer ------------------------------------------------------------
+
+export type TagModality =
+  | "text"
+  | "image"
+  | "video"
+  | "audio"
+  | "link"
+  | "cross-modal";
+
+export type TagSeverity = "info" | "warn" | "danger" | "neutral";
+
+export interface TagCatalogEntry {
+  tagId: string;
+  displayName: string;
+  description: string;
+  applicableModalities: readonly TagModality[];
+  severity: TagSeverity;
+  group: string;
+  supportsSegmentScope: boolean;
+  supportsSpanScope: boolean;
+}
+
+export interface PersistedReviewerTag {
+  id: string;
+  contentEventId: string;
+  reviewDecisionId: string;
+  instanceId: string;
+  reviewerId: string;
+  tagId: string;
+  scope?: ReviewerTag["scope"];
+  note?: string;
+  createdAt: string;
+}
+
+export async function getTagCatalog(): Promise<TagCatalogEntry[]> {
+  if (isDemoModeActive()) return getDemoTagCatalog();
+  const res = await fetch(`${WORKER_URL}/v1/tags/catalog`);
+  if (!res.ok) throw new Error(`getTagCatalog failed: ${res.status}`);
+  const body = (await res.json()) as { catalog: TagCatalogEntry[] };
+  return body.catalog;
+}
+
+export async function listReviewerTagsForEvent(
+  eventId: string,
+): Promise<PersistedReviewerTag[]> {
+  if (isDemoModeActive()) return getDemoReviewerTagsForEvent(eventId);
+  const res = await fetch(
+    `${WORKER_URL}/v1/tags?eventId=${encodeURIComponent(eventId)}`,
+  );
+  if (!res.ok) throw new Error(`listReviewerTagsForEvent failed: ${res.status}`);
+  const body = (await res.json()) as { tags: PersistedReviewerTag[] };
+  return body.tags;
+}
+
+export interface TagFrequencyRow {
+  tagId: string;
+  count: number;
+}
+
+export async function getTagFrequencies(
+  instance: string,
+): Promise<{ frequencies: TagFrequencyRow[]; total: number }> {
+  if (isDemoModeActive()) return getDemoTagFrequencies();
+  const res = await fetch(
+    `${WORKER_URL}/v1/tags/frequencies?instance=${encodeURIComponent(instance)}`,
+  );
+  if (!res.ok) throw new Error(`getTagFrequencies failed: ${res.status}`);
+  return (await res.json()) as { frequencies: TagFrequencyRow[]; total: number };
 }

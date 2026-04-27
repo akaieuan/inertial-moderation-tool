@@ -248,25 +248,69 @@ DATABASE_URL=postgres://aur:aur@localhost:5432/aur pnpm --filter @inertial/runci
 
 ---
 
+## Verifiability — `pnpm eval`
+
+Calibration is a hash-chained artifact, not vibes. From the repo root:
+
+```bash
+pnpm eval
+```
+
+Boots an in-memory pipeline, dispatches the 30-event hand-labeled gold set
+(`config/evals/gold-set-v1.jsonl`) through the live skill registry, and
+prints per-(skill, channel) Brier / ECE / agreement:
+
+```
+skill                                  channel                  brier     ece   agree  samples
+────────────────────────────────────── ────────────────────── ─────── ─────── ─────── ────────
+text-classify-toxicity@local           toxic                   0.0330  0.0888    0.93       30
+text-classify-toxicity@local           insult                  0.0421  0.0604    0.90       30
+text-classify-toxicity@local           obscene                 0.0345  0.0596    0.90       30
+text-classify-toxicity@local           threat                  0.0241  0.0291    0.97       30
+text-context-author@local              context.author-prior-…  0.1480  0.1933    0.83       30
+text-detect-spam-link                  spam-link-presence      0.0213  0.0267    0.97       30
+────────────────────────────────────── ────────────────────── ─────── ─────── ─────── ────────
+6 (skill, channel) row(s) | scored: 30 | unresolved: 0 | failed: 0 | mean latency: 8ms
+```
+
+The gold set grows organically: every reviewer commit decision's
+`signalFeedback` + `reviewerTags` auto-promotes to a `gold_events` row
+(source `reviewer-derived`). Hand-edit the JSONL or click "Add tag" in the
+dashboard — both paths grow the same corpus.
+
+Cloud skills are skipped by default (free + fast in CI). Set
+`EVAL_INCLUDE_CLOUD=true` to score Anthropic / Voyage too.
+Set `EVAL_BRIER_THRESHOLD=0.15` to fail CI on regressions.
+
+The script prints a machine-parseable final line —
+`[eval] result=ok scored=30 skipped=0 rows=6` — so CI can grep for success
+even when Node's exit on macOS races with `@huggingface/transformers`'s
+WASM thread teardown (a cosmetic libc++abi message that doesn't affect
+the actual results above).
+
+---
+
 ## What's actually working today
 
 Be honest about pre-alpha state.
 
 | Component | Status |
 |---|---|
-| `@inertial/schemas` | Real. 8 Zod schemas (ContentEvent, StructuredSignal, AgentTrace, ReviewItem, ReviewDecision, Policy, AuditEntry, supporting unions). |
-| `@inertial/core` | Real. BaseAgent + TraceCollector + InMemoryRunciter (orchestrator) + max-confidence aggregator. |
-| `@inertial/db` | Real. 8 tables (7 schema-mirrored + event_embeddings). 41 hermetic integration tests. Hash-chained audit with tamper detection. pglite dev factory + postgres-js prod. |
-| `@inertial/policy` | Real. YAML loader + structured AST evaluator. First-match wins; per-instance versioning. |
+| `@inertial/schemas` | Real. 12+ Zod schemas: ContentEvent, StructuredSignal, AgentTrace, ReviewItem, ReviewDecision (+ `reviewerTags`), Policy, AuditEntry, SkillRegistration, GoldEvent, EvalRun, SkillCalibration, ReviewerTag + scope, TagAgreement. |
+| `@inertial/core` | Real. BaseAgent + TraceCollector + InMemoryRunciter, SkillRegistry + ToolRegistry, `SKILL_CATALOG`, `TAG_CATALOG` (~18 starter tags). |
+| `@inertial/db` | Real. 14 tables (incl. `skill_registrations`, `gold_events`, `eval_runs`, `skill_calibrations`, `reviewer_tags`, `event_embeddings`). **68 hermetic integration tests.** Hash-chained audit with tamper detection. |
+| `@inertial/policy` | Real. YAML loader + structured AST evaluator. First-match wins; per-instance versioning. Confidence-based escalation working. |
+| `@inertial/eval` | Real. Brier / ECE / agreement + tag-PRF scoring, calibration aggregator, JSONL loader, reviewer-derived auto-promotion, persistence-agnostic runner. **30 unit tests.** |
 | `apps/gateway` | Real. Hono ingest, normalizes payloads, forwards to runciter. |
-| `apps/runciter` | Real. Runciter (orchestrator) runtime, persists through `@inertial/db`, evaluates policy, creates review items, audits every step. |
-| `apps/inertial-app` | Real. Electron + React + Tailwind v4 + HITL-KIT. Queue + Eval views. |
-| `text-regex` (Tier 0 inertial) | Real. URL detection. |
-| `text-toxicity-local` (Tier 1 inertial) | Real. `@huggingface/transformers` running `Xenova/toxic-bert`. ~50ms/event after warmup. |
-| `vision-*`, `video-*`, `audio-*`, `identity-*`, `context-*` inertials | Stubbed. Empty `analyze()` returning `[]`. |
+| `apps/runciter` | Real. Runciter runtime + 5 eval endpoints + 3 tag endpoints + boot-time gold-set loader + reviewer-derived gold auto-promotion on every commit decision. |
+| `apps/inertial-app` | Real. Electron + React + Tailwind v4. Live Insights tab (calibration table + Tag corpus + Eval runs history + Run-eval button), QueueDetailPanel with reviewer-tag picker. |
+| `text-regex` (Tier 0) | Real. URL detection via skill `text-detect-spam-link`. |
+| `text-toxicity-local` (Tier 1) | Real. `Xenova/toxic-bert` via transformers.js. ~50ms/event after warmup. |
+| `text-context-author@local` + `text-context-similar@local` | Real. Context skills via `db.author.list-history` + `db.events.find-similar` tools. |
+| `vision-*`, `video-*`, `audio-*`, `identity-*` inertials | Stubbed. Empty `analyze()` returning `[]`. |
 | `connectors-{activitypub,atproto,lemmy,sdk-webhook}` | Stubbed. |
-| `@inertial/agents-cloud` (Tier 3) | Real. Anthropic-backed text-toxicity skill. |
-| `@inertial/eval` wrapping `@eval-kit/core` | Stubbed. UI primitives are wired in `@inertial/app`'s Eval tab. |
+| `@inertial/agents-cloud` | Real. Anthropic text-toxicity + image-NSFW + Voyage embeddings — all factory-shaped so per-instance API keys work via the catalog. |
+| `pnpm eval` | Real. Boots an in-memory pipeline, runs the gold set against the live skill registry, prints per-(skill, channel) Brier / ECE / agreement, exits non-zero on regressions when `EVAL_BRIER_THRESHOLD` is set. |
 
 ---
 
@@ -422,15 +466,17 @@ The kernel is real; the agent + connector roster is sparse on purpose. The roadm
 | **Vision + split-pane review** | Claude Vision moderation (`image-classify@anthropic`), split-pane queue → detail layout, evidence rendering with bbox overlays | Image flags get the same audit + reviewer treatment as text. |
 | **Shadow runs + compliance** | Skills can run as `shadow:` peers; their decisions are recorded silently. Compliance tab surfaces per-skill agreement vs. the human reviewer. | Free continuous gold-set generation. Calibration data flows back into the eval harness. |
 | **Reviewer experience** | Dashboard FlagMap heatmap with hover stats, three-deck queue layout with inline review session, Pipelines visual canvas, Skills create sheet, Insights rebuilt on internal primitives, side panels (Chat / Notes / Agent activity) docked edge-to-edge | The dashboard reads as one app instead of seven loosely related views. See [`docs/screenshots/`](docs/screenshots/). |
+| **Skills + tools layer** | Skill / tool registries in `@inertial/core`, `SKILL_CATALOG` of installable modules, `skill_registrations` persistence, dashboard catalog picker + per-instance hot toggle, factory-shaped cloud skills, `db.author.list-history` + `db.events.find-similar` + `db.embeddings.get` tools | Adding a skill becomes a registration row, not a code change. The reviewer can wire Voyage / Anthropic / etc. without touching YAML. |
+| **Context engine** | `ContextAgent` composing `text-context-author@local` + `text-context-similar@local`. Voyage embeddings populate `event_embeddings` inline on every text-bearing event. Author history + similar events surface in the queue detail panel. | "Has this user done this before? Has anything like this happened before?" answered for every queued item. |
+| **Eval harness + reviewer-tagged corpus** | `@inertial/eval` (Brier / ECE / agreement scoring), `gold_events` + `eval_runs` + `skill_calibrations` tables, JSONL gold-set v1 (30 hand-labeled cases), `pnpm eval` CLI with summary table, runciter `/v1/eval/runs` endpoints, Insights tab live, **reviewer-tag layer** (`TAG_CATALOG`, `reviewer_tags` table, per-modality / per-segment scoping, in-line tag picker on every queued item) | Calibration becomes hash-chained, not vibes. Every reviewer commit grows the gold set automatically (auto-promotion). The "good video bad audio" mixed-validity case gets a precise label, not a whole-asset verdict. |
 
 ### In flight
 
-- **Skills + tools layer.** Refactor inertials to compose reusable skills (`classify-toxicity`, `extract-pii`, `lookup-author-history`). Tool registry backed by `@inertial/db` (author lookup, similarity search, phash query). Per-instance skill allow/block lists.
-- **Context engine.** Drops out of the tools layer — pgvector similarity search + author history queries powered by `@inertial/db`.
 - **More inertials.** `vision-ollama` (LLaVA / qwen2.5-vl), `audio-whisper-local`, `phash-similarity`, expanded `@inertial/agents-cloud` (OpenAI, Gemini).
+- **Video moderation.** ffmpeg-driven keyframe extraction → existing image skills, Whisper transcription → existing text skills, Gemini multi-frame for temporal reasoning. The schema (`video-segment` evidence, video modality) already supports it.
 - **Pipeline stages with budgets.** Per-modality cost caps, confidence-based escalation: cheap triage inertials short-circuit when confident; only the ambiguous middle goes to cloud.
 - **Real connectors.** ActivityPub / AT Protocol firehose subscribers.
-- **Eval harness.** Wire `@inertial/eval` into `@eval-kit/core`. Per-inertial calibration tracking (Brier, ECE) feeding the Insights tab live.
+- **Tag-aware skills.** A `text-context-precedent@rag` skill that calls a `db.tags.find-similar` tool and surfaces "5 prior cases tagged `audio.harassment`, reviewers went 4 remove / 1 escalate" as in-context evidence for cloud skills.
 
 ### Capturing fresh screenshots
 

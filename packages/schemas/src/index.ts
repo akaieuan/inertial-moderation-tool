@@ -18,3 +18,5 @@ export * from "./policy.js";
 export * from "./review.js";
 export * from "./audit.js";
 export * from "./skill-registration.js";
+export * from "./eval.js";
+export * from "./tag.js";
