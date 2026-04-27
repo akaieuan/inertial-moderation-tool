@@ -1,23 +1,29 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ReviewItem, ReviewVerdict } from "@inertial/schemas";
-import { commitDecision, listQueue } from "../lib/api.js";
+import { Keyboard, RefreshCw } from "lucide-react";
+import type { ReviewItem } from "@inertial/schemas";
+import { listQueue } from "../lib/api.js";
+import { Button } from "../components/ui/button.js";
+import { Skeleton } from "../components/ui/skeleton.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog.js";
+import { QueueDeck } from "../components/QueueDeck.js";
+import { QueueReviewSession } from "../components/QueueReviewSession.js";
+import { PageHeader } from "../components/PageHeader.js";
+import { useDemoMode } from "../lib/demo-mode.js";
 import { cn } from "../lib/utils.js";
-import { QueueDetailPanel } from "./QueueDetailPanel.js";
 
 const INSTANCE = "smoke.local";
-const REVIEWER = "ieuan@local";
 const REFRESH_MS = 4_000;
 
-const QUEUE_BADGE: Record<ReviewItem["queue"], string> = {
-  quick: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30",
-  deep: "bg-amber-500/15 text-amber-300 ring-amber-500/30",
-  escalation: "bg-rose-500/15 text-rose-300 ring-rose-500/30",
-};
-
 export function QueueView() {
+  const { demo } = useDemoMode();
   const [items, setItems] = useState<ReviewItem[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [openItemId, setOpenItemId] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -32,286 +38,202 @@ export function QueueView() {
 
   useEffect(() => {
     void refresh();
+    if (demo) return;
     const handle = setInterval(refresh, REFRESH_MS);
     return () => clearInterval(handle);
-  }, [refresh]);
+  }, [refresh, demo]);
 
-  const selectedItem = useMemo(
-    () => items?.find((i) => i.id === selectedItemId) ?? null,
-    [items, selectedItemId],
+  const grouped = useMemo(() => {
+    const out = { quick: [] as ReviewItem[], deep: [] as ReviewItem[], escalation: [] as ReviewItem[] };
+    if (!items) return out;
+    for (const i of items) {
+      if (i.state === "decided") continue;
+      out[i.queue].push(i);
+    }
+    return out;
+  }, [items]);
+
+  const counts = useMemo(() => {
+    const c = { quick: 0, deep: 0, escalation: 0, decided: 0, pending: 0 };
+    for (const i of items ?? []) {
+      if (i.state === "decided") c.decided += 1;
+      else {
+        c.pending += 1;
+        c[i.queue] += 1;
+      }
+    }
+    return c;
+  }, [items]);
+
+  const openItem = useMemo(
+    () => items?.find((i) => i.id === openItemId) ?? null,
+    [items, openItemId],
   );
 
-  // Keyboard shortcuts. Active when an item is selected (or `?` for help).
-  // Ignored when focus is in an editable element so reviewers can type rationale.
   useEffect(() => {
     function isTypingTarget(target: EventTarget | null): boolean {
       if (!(target instanceof HTMLElement)) return false;
       const tag = target.tagName;
       return tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable;
     }
-
-    async function quickDecide(verdict: ReviewVerdict) {
-      if (!selectedItem || selectedItem.state === "decided") return;
-      try {
-        await commitDecision({
-          reviewItemId: selectedItem.id,
-          reviewerId: REVIEWER,
-          verdict,
-          durationMs: 1,
-        });
-        await refresh();
-        // Auto-advance to the next pending item.
-        const next = pendingNeighbor(items, selectedItem.id, +1);
-        setSelectedItemId(next?.id ?? null);
-      } catch {
-        // surfaced in panel error state on next refresh
-      }
-    }
-
     function onKey(e: KeyboardEvent) {
       if (isTypingTarget(e.target)) return;
-      if (e.key === "?") {
-        setHelpOpen((v) => !v);
-        return;
-      }
-      if (!selectedItem) return;
-      if (e.key === "Escape") {
-        setSelectedItemId(null);
-        return;
-      }
-      if (e.key === "j" || e.key === "ArrowDown") {
-        const next = neighbor(items, selectedItem.id, +1);
-        if (next) setSelectedItemId(next.id);
-        return;
-      }
-      if (e.key === "k" || e.key === "ArrowUp") {
-        const prev = neighbor(items, selectedItem.id, -1);
-        if (prev) setSelectedItemId(prev.id);
-        return;
-      }
-      if (e.key === "a") void quickDecide("approve");
-      if (e.key === "r") void quickDecide("remove");
-      if (e.key === "e") void quickDecide("escalate");
+      if (e.key === "?") setHelpOpen((v) => !v);
+      if (e.key === "Escape") setOpenItemId(null);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [items, refresh, selectedItem]);
-
-  const splitView = selectedItemId !== null;
+  }, []);
 
   return (
-    <div className="mx-auto flex max-w-7xl flex-col gap-4">
-      <header className="flex items-baseline justify-between">
-        <div>
-          <h2 className="text-lg font-light tracking-tight">Review queue</h2>
-          <p className="text-xs text-[color:var(--muted-foreground)]">
-            instance · <span className="font-mono">{INSTANCE}</span> ·{" "}
-            {items === null
-              ? "loading…"
-              : `${items.filter((i) => i.state !== "decided").length} pending · ${items.filter((i) => i.state === "decided").length} decided`}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setHelpOpen(true)}
-            className="rounded-md border border-[color:var(--border)] px-3 py-1 text-xs uppercase tracking-widest text-[color:var(--muted-foreground)] hover:text-[color:var(--foreground)]"
-          >
-            ? shortcuts
-          </button>
-          <button
-            onClick={refresh}
-            className="rounded-md border border-[color:var(--border)] px-3 py-1 text-xs uppercase tracking-widest text-[color:var(--muted-foreground)] hover:text-[color:var(--foreground)]"
-          >
-            Refresh
-          </button>
-        </div>
-      </header>
+    <div className="flex flex-col gap-4">
+      <PageHeader
+        title="Review queue"
+        description={
+          <>
+            <span className="font-mono">{INSTANCE}</span>
+            <CountChip label="pending" value={counts.pending} tone="default" />
+            <CountChip label="quick" value={counts.quick} tone="good" />
+            <CountChip label="deep" value={counts.deep} tone="warn" />
+            <CountChip label="esc" value={counts.escalation} tone="danger" />
+            <span className="text-muted-foreground/60">·</span>
+            <span>{counts.decided} decided</span>
+          </>
+        }
+        actions={
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setHelpOpen(true)}
+              className="h-7 px-2 text-[11px]"
+            >
+              <Keyboard className="mr-1 h-3 w-3" />
+              Shortcuts
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={refresh}
+              className="h-7 px-2 text-[11px]"
+            >
+              <RefreshCw className="mr-1 h-3 w-3" />
+              Refresh
+            </Button>
+          </>
+        }
+      />
 
       {error && (
-        <p className="rounded-md border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-300">
+        <div className="rounded-md border border-rose-500/30 bg-rose-500/5 p-3 text-sm text-rose-700 dark:text-rose-300">
           {error} — is the runciter running on :4001?
-        </p>
+        </div>
       )}
 
-      {items && items.length === 0 && !error && (
-        <p className="rounded-md border border-[color:var(--border)] p-6 text-center text-sm text-[color:var(--muted-foreground)]">
-          Queue is empty. Run <code className="font-mono">pnpm seed</code> to
-          populate it.
-        </p>
-      )}
-
-      {items === null && !error && (
-        <ul className="flex flex-col gap-2">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <li
-              key={i}
-              className="h-12 animate-pulse rounded-lg border border-[color:var(--border)] bg-[color:var(--card)]"
-            />
+      {items === null && !error ? (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-[320px] w-full rounded-xl" />
           ))}
-        </ul>
+        </div>
+      ) : openItem ? (
+        <section className="rounded-xl border border-border bg-card/30">
+          <QueueReviewSession
+            queue={openItem.queue}
+            items={grouped[openItem.queue]}
+            startItemId={openItem.id}
+            onCommit={refresh}
+            onClose={() => setOpenItemId(null)}
+          />
+        </section>
+      ) : (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <QueueDeck
+            queue="quick"
+            items={grouped.quick}
+            onOpen={(item) => setOpenItemId(item.id)}
+          />
+          <QueueDeck
+            queue="deep"
+            items={grouped.deep}
+            onOpen={(item) => setOpenItemId(item.id)}
+          />
+          <QueueDeck
+            queue="escalation"
+            items={grouped.escalation}
+            onOpen={(item) => setOpenItemId(item.id)}
+          />
+        </div>
       )}
 
-      {items && items.length > 0 && (
-        <div
-          className={cn(
-            "grid gap-4",
-            splitView
-              ? "grid-cols-[18rem_1fr] h-[calc(100vh-12rem)]"
-              : "grid-cols-1",
-          )}
-        >
-          <ul
-            className={cn(
-              "flex flex-col gap-2 overflow-y-auto",
-              splitView && "pr-2",
-            )}
-          >
-            {items.map((item) => (
-              <li key={item.id}>
-                <button
-                  onClick={() =>
-                    setSelectedItemId((cur) => (cur === item.id ? null : item.id))
-                  }
-                  className={cn(
-                    "block w-full rounded-lg border p-3 text-left transition-colors",
-                    item.id === selectedItemId
-                      ? "border-[color:var(--accent-blue)] bg-[color:var(--card)]"
-                      : "border-[color:var(--border)] bg-[color:var(--card)] hover:border-[color:var(--border-strong)]",
-                  )}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span
-                      className={cn(
-                        "inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ring-1 ring-inset",
-                        QUEUE_BADGE[item.queue],
-                      )}
-                    >
-                      {item.queue}
-                    </span>
-                    {item.state === "decided" && (
-                      <span className="text-[10px] uppercase tracking-widest text-[color:var(--muted-foreground)]">
-                        {item.finalVerdict}
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-1 truncate font-mono text-[10px] text-[color:var(--muted-foreground)]">
-                    {item.contentEventId.slice(0, 8)}
-                  </div>
-                  <div
-                    className={cn(
-                      "mt-0.5 truncate text-xs",
-                      splitView ? "text-[color:var(--muted-foreground)]" : "",
-                    )}
-                  >
-                    {item.recommendedAction.reason}
-                  </div>
-                </button>
-              </li>
-            ))}
+      <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-light uppercase tracking-widest">
+              Keyboard shortcuts
+            </DialogTitle>
+          </DialogHeader>
+          <ul className="mt-2 space-y-2 text-sm">
+            <ShortcutRow keys={["esc"]} action="close detail" />
+            <ShortcutRow keys={["?"]} action="toggle this help" />
           </ul>
-
-          {splitView && selectedItem && (
-            <QueueDetailPanel
-              item={selectedItem}
-              onCommit={async () => {
-                await refresh();
-              }}
-              onClose={() => setSelectedItemId(null)}
-            />
-          )}
-        </div>
-      )}
-
-      {helpOpen && <HelpOverlay onClose={() => setHelpOpen(false)} />}
+          <p className="mt-3 text-[11px] text-muted-foreground">
+            Inside an open card, use <kbd className="rounded border border-border bg-muted px-1 font-mono">a</kbd> /{" "}
+            <kbd className="rounded border border-border bg-muted px-1 font-mono">r</kbd> /{" "}
+            <kbd className="rounded border border-border bg-muted px-1 font-mono">e</kbd> to commit.
+          </p>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-function neighbor(
-  items: readonly ReviewItem[] | null,
-  fromId: string,
-  delta: 1 | -1,
-): ReviewItem | null {
-  if (!items) return null;
-  const idx = items.findIndex((i) => i.id === fromId);
-  if (idx === -1) return null;
-  const next = items[idx + delta];
-  return next ?? null;
-}
-
-function pendingNeighbor(
-  items: readonly ReviewItem[] | null,
-  fromId: string,
-  delta: 1 | -1,
-): ReviewItem | null {
-  if (!items) return null;
-  let idx = items.findIndex((i) => i.id === fromId);
-  if (idx === -1) return null;
-  while (true) {
-    idx += delta;
-    const next = items[idx];
-    if (!next) return null;
-    if (next.state !== "decided") return next;
-  }
-}
-
-function HelpOverlay({ onClose }: { onClose: () => void }) {
-  return (
-    <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="w-[28rem] rounded-lg border border-[color:var(--border)] bg-[color:var(--card)] p-6 text-sm"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 className="mb-3 text-xs uppercase tracking-widest text-[color:var(--muted-foreground)]">
-          Keyboard shortcuts
-        </h3>
-        <ul className="space-y-2 font-mono text-xs">
-          <ShortcutRow keys={["j", "↓"]} action="next item" />
-          <ShortcutRow keys={["k", "↑"]} action="previous item" />
-          <ShortcutRow keys={["a"]} action="approve" />
-          <ShortcutRow keys={["r"]} action="remove" />
-          <ShortcutRow keys={["e"]} action="escalate" />
-          <ShortcutRow keys={["esc"]} action="back to list" />
-          <ShortcutRow keys={["?"]} action="toggle this help" />
-        </ul>
-        <div className="mt-4 text-[10px] text-[color:var(--muted-foreground)]">
-          Shortcuts ignore inputs/textareas — type rationale freely. Quick keys
-          (a/r/e) skip the rationale field; click the buttons to require one.
-        </div>
-        <button
-          onClick={onClose}
-          className="mt-4 w-full rounded-md border border-[color:var(--border)] py-1 text-xs uppercase tracking-widest hover:bg-[color:var(--muted)]"
-        >
-          close
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ShortcutRow({
-  keys,
-  action,
-}: {
-  keys: readonly string[];
-  action: string;
-}) {
+function ShortcutRow({ keys, action }: { keys: readonly string[]; action: string }) {
   return (
     <li className="flex items-center justify-between">
       <span className="flex gap-1">
         {keys.map((k) => (
           <kbd
             key={k}
-            className="rounded border border-[color:var(--border)] bg-[color:var(--muted)] px-1.5 py-0.5"
+            className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px]"
           >
             {k}
           </kbd>
         ))}
       </span>
-      <span className="text-[color:var(--muted-foreground)]">{action}</span>
+      <span className="text-muted-foreground">{action}</span>
     </li>
+  );
+}
+
+function CountChip({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "default" | "good" | "warn" | "danger";
+}) {
+  const toneCls = {
+    default: "text-foreground",
+    good: "text-emerald-700 dark:text-emerald-300",
+    warn: "text-amber-700 dark:text-amber-300",
+    danger: "text-rose-700 dark:text-rose-300",
+  }[tone];
+  const dotCls = {
+    default: "bg-muted-foreground/40",
+    good: "bg-emerald-500",
+    warn: "bg-amber-500",
+    danger: "bg-rose-500",
+  }[tone];
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className={cn("h-1.5 w-1.5 rounded-full", dotCls)} />
+      <span className={cn("font-medium tabular-nums", toneCls)}>{value}</span>
+      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+    </span>
   );
 }

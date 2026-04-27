@@ -15,6 +15,8 @@
 1. **`@inertial/*` toolkit** — orchestration, persistence, policy, and HITL primitives. Sibling to [`eval-kit`](https://github.com/akaieuan/eval-kit) and [`HITL-KIT`](https://github.com/akaieuan/HITL-KIT).
 2. **`@inertial/app`** — Electron + React + Tailwind reference dashboard for moderators, built on HITL-KIT.
 
+![Inertial dashboard — flag activity heatmap, queue mix, top of queue](docs/screenshots/dashboard.png)
+
 ---
 
 ## Naming
@@ -26,6 +28,58 @@ The project takes its vocabulary from Philip K. Dick's *Ubik* (1969):
 - **structured signals** — what inertials emit. Probability + confidence + evidence pointers. Never verdicts. The policy layer turns signals into routing decisions; humans turn routing decisions into actions.
 
 If you only remember one rule: **inertials emit signals; the Runciter dispatches them; humans decide.**
+
+---
+
+## The reviewer surface
+
+The dashboard is the reference implementation of the `inertial` HITL contract. Every flag flows through here; nothing the runciter does is hidden.
+
+### Dashboard — flag activity at a glance
+
+The first thing the reviewer sees: a 52-week flag heatmap (GitHub-style, but red and pale enough to scan without being alarming), the day-by-day breakdown on hover, the operational stats below, and the next items waiting on a moderator on the right.
+
+![Dashboard with flag-activity heatmap, stats grid, queue mix](docs/screenshots/dashboard.png)
+
+### Queue — three decks, click to review inline
+
+The Quick / Deep / Escalation queues live side by side. Each card is one pending item with author, snippet, and the top channel that fired. Click any card and the deck opens **in place** (not as a modal) so you can flip through the stack approving / removing / escalating without losing the rest of the page.
+
+![Queue page with three deck columns](docs/screenshots/queue.png)
+
+![Queue review session — inline deck flip-through](docs/screenshots/queue-review.png)
+
+### Pipelines — wire up your dispatch flow
+
+Visual canvas showing how an event flows through the runciter. Below it: the active YAML configurations the instance has loaded, with route badges colour-tied to the queues they feed.
+
+![Pipelines page with visual canvas + active configs](docs/screenshots/pipelines.png)
+
+### Skills — what the runciter is allowed to do
+
+Active classifiers + registered tools, with execution model + privacy budget visible per skill. The **Add skill** sheet is the entry point for registering a new classifier without touching YAML.
+
+![Skills page with stat row + skill list](docs/screenshots/skills.png)
+
+![Skills create sheet — add a new classifier](docs/screenshots/skills-create-sheet.png)
+
+### Compliance — hash-chained audit + shadow agreement
+
+Per-skill shadow agreement (how often each silent skill agreed with the human) plus the live audit feed — every state transition the runciter wrote, in order.
+
+![Compliance page with shadow agreement + audit feed](docs/screenshots/compliance.png)
+
+### Insights — calibration & drift
+
+Brier / ECE per inertial, gold-set coverage, recent regressions. Where you check whether the model still knows what it's doing.
+
+![Insights page with calibration table + coverage donut](docs/screenshots/insights.png)
+
+### Side panels — chat, notes, agent activity
+
+The right rail extends edge-to-edge from the top of the window. The Chat panel mirrors the Claude home pattern (greeting, overview card with a 15-week flag heatmap, suggestion chips, pill input with model + tools below). Notes is a per-case scratchpad; Agent activity shows the live inertial dispatch trace.
+
+![Dashboard with chat panel open](docs/screenshots/dashboard-chat-panel.png)
 
 ---
 
@@ -354,23 +408,40 @@ Conditions form a tree: leaf (`channel + op + value` or `entity + present`), `al
 
 ---
 
-## Roadmap
+## Where we are in the build (month 1 of 3)
 
-**Done (month 1):**
+Pre-alpha. The kernel is real; the agent + connector roster is sparse on purpose. The roadmap is split into pillars so you can tell what's load-bearing today vs. what's in flight.
 
-- Pillar 0 — schemas, core, gateway/runciter shells, end-to-end smoke
-- Pillar 1 — `@inertial/db` persistence with hash-chained audit + 41 tests
-- Pillar 2 — orchestration upgrade with real toxicity classifier + DB-persisted pipeline + dashboard reading live data + decision flow
+### Done — month 1
 
-**Next:**
+| Pillar | What landed | Why it matters |
+|---|---|---|
+| **Pillar 0** — Foundations | `@inertial/schemas` (8 Zod contracts), `@inertial/core` (Runciter, BaseAgent, max-confidence aggregator), gateway + runciter shells, end-to-end smoke | Every cross-package shape is a typed Zod schema. The runciter dispatches inertials; humans decide. |
+| **Pillar 1** — Persistence + audit | `@inertial/db` (Drizzle + Postgres + pgvector), 8 tables, **hash-chained audit log with tamper detection**, pglite dev factory, 41 hermetic integration tests | "No remote API touched my instance over the last 30 days" becomes a hash-chained artifact, not a promise. |
+| **Pillar 2** — Live moderation pipeline | Real `text-toxicity-local` (`Xenova/toxic-bert` via transformers.js, ~50ms/event after warmup), `@inertial/policy` YAML evaluator, DB-persisted pipeline, dashboard reading live data, decision commit flow | Seed 10 events → see them route to queues → approve/remove from the dashboard → audit log grows. |
+| **Pillar 3** — Vision + split-pane review UX | Claude Vision moderation (`image-classify@anthropic`), split-pane queue → detail layout, evidence rendering with bbox overlays | Image flags get the same audit + reviewer treatment as text. |
+| **Pillar 4** — Shadow runs + compliance dashboard | Skills can run as `shadow:` peers; their decisions are recorded silently. Compliance tab surfaces per-skill agreement vs. the human reviewer. | Free continuous gold-set generation. Calibration data flows back into the eval harness. |
+| **Reviewer experience overhaul** *(this PR)* | Dashboard FlagMap heatmap with hover stats, three-deck queue layout with inline review session, Pipelines visual canvas, Skills create sheet, Insights rebuilt on internal primitives, side panels (Chat / Notes / Agent activity) docked edge-to-edge | The dashboard now reads as one app instead of seven loosely related views. See [`docs/screenshots/`](docs/screenshots/). |
 
-- **Pillar 4 — Skills + tools layer.** Refactor inertials to compose reusable skills (`classify-toxicity`, `extract-pii`, `lookup-author-history`). Tool registry backed by `@inertial/db` (author lookup, similarity search, phash query). Per-instance skill allow/block lists.
-- **Pillar 3 — Context engine.** Drops out of the tools layer — pgvector similarity search + author history queries powered by `@inertial/db`.
-- **Real inertials.** `vision-ollama` (LLaVA / qwen2.5-vl), `audio-whisper-local`, `phash-similarity`, then expanded `@inertial/agents-cloud` (Anthropic, OpenAI, Gemini).
+### Next — months 2 & 3
+
+- **Pillar 5 — Skills + tools layer.** Refactor inertials to compose reusable skills (`classify-toxicity`, `extract-pii`, `lookup-author-history`). Tool registry backed by `@inertial/db` (author lookup, similarity search, phash query). Per-instance skill allow/block lists.
+- **Pillar 6 — Context engine.** Drops out of the tools layer — pgvector similarity search + author history queries powered by `@inertial/db`.
+- **Real inertials.** `vision-ollama` (LLaVA / qwen2.5-vl), `audio-whisper-local`, `phash-similarity`, expanded `@inertial/agents-cloud` (OpenAI, Gemini).
 - **Pipeline stages with budgets.** Per-modality cost caps, confidence-based escalation: cheap triage inertials short-circuit when confident; only the ambiguous middle goes to cloud.
-- **Pillar 5 — Shadow / puppet runs.** Inertials run silently alongside reviewers; decisions become free gold-set entries. Continuous evaluation graded by the actual operator.
 - **Real connectors.** ActivityPub / AT Protocol firehose subscribers.
-- **Eval harness.** Wire `@inertial/eval` into `@eval-kit/core`. Per-inertial calibration tracking (Brier, ECE).
+- **Eval harness.** Wire `@inertial/eval` into `@eval-kit/core`. Per-inertial calibration tracking (Brier, ECE) feeding the Insights tab live.
+
+### Capturing fresh screenshots
+
+The screenshots in this README are auto-generated against the dev server.
+
+```bash
+pnpm --filter @inertial/app dev   # in one terminal
+node scripts/capture-screenshots.mjs  # in another — writes to docs/screenshots/
+```
+
+The script uses puppeteer-core against a system Chrome (override with `CHROME_PATH`), navigates each route, and writes 1600×1000 dark-mode PNGs.
 
 ---
 

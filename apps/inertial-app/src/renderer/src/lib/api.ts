@@ -6,6 +6,15 @@ import type {
   ReviewVerdict,
   StructuredSignal,
 } from "@inertial/schemas";
+import { isDemoModeActive } from "./demo-mode.js";
+import {
+  getDemoAudit,
+  getDemoChainVerification,
+  getDemoEventDetail,
+  getDemoQueue,
+  getDemoShadowAgreement,
+  getDemoSkills,
+} from "./demo-data.js";
 
 /** Mirrored from @inertial/db's `SkillAgreement` to avoid pulling pglite into the renderer bundle. */
 export interface SkillAgreement {
@@ -22,6 +31,7 @@ const WORKER_URL =
   "http://localhost:4001";
 
 export async function listQueue(instanceId: string): Promise<ReviewItem[]> {
+  if (isDemoModeActive()) return getDemoQueue();
   const res = await fetch(
     `${WORKER_URL}/v1/queue?instance=${encodeURIComponent(instanceId)}`,
   );
@@ -37,6 +47,11 @@ export interface EventDetail {
 }
 
 export async function getEventDetail(eventId: string): Promise<EventDetail> {
+  if (isDemoModeActive()) {
+    const d = getDemoEventDetail(eventId);
+    if (!d) throw new Error("event not in demo set");
+    return d;
+  }
   const res = await fetch(`${WORKER_URL}/v1/events/${eventId}`);
   if (!res.ok) throw new Error(`getEventDetail failed: ${res.status}`);
   return (await res.json()) as EventDetail;
@@ -51,6 +66,7 @@ export interface DecisionInput {
 }
 
 export async function commitDecision(input: DecisionInput): Promise<void> {
+  if (isDemoModeActive()) return;
   const res = await fetch(
     `${WORKER_URL}/v1/reviews/${input.reviewItemId}/decisions`,
     {
@@ -97,6 +113,7 @@ export interface SkillsResponse {
 }
 
 export async function getSkills(): Promise<SkillsResponse> {
+  if (isDemoModeActive()) return getDemoSkills();
   const res = await fetch(`${WORKER_URL}/v1/skills`);
   if (!res.ok) throw new Error(`getSkills failed: ${res.status}`);
   return (await res.json()) as SkillsResponse;
@@ -106,6 +123,11 @@ export async function listAudit(
   instanceId: string,
   opts: { limit?: number; from?: number } = {},
 ): Promise<AuditEntry[]> {
+  if (isDemoModeActive()) {
+    const all = getDemoAudit();
+    const limit = opts.limit ?? all.length;
+    return all.slice(-limit);
+  }
   const params = new URLSearchParams();
   if (opts.limit !== undefined) params.set("limit", String(opts.limit));
   if (opts.from !== undefined) params.set("from", String(opts.from));
@@ -128,6 +150,7 @@ export interface AuditChainVerification {
 export async function verifyAudit(
   instanceId: string,
 ): Promise<AuditChainVerification> {
+  if (isDemoModeActive()) return getDemoChainVerification();
   const res = await fetch(
     `${WORKER_URL}/v1/audit/${encodeURIComponent(instanceId)}/verify`,
   );
@@ -138,10 +161,21 @@ export async function verifyAudit(
 export async function getShadowAgreement(
   instanceId: string,
 ): Promise<SkillAgreement[]> {
+  if (isDemoModeActive()) return getDemoShadowAgreement();
   const res = await fetch(
     `${WORKER_URL}/v1/shadow/${encodeURIComponent(instanceId)}/agreement`,
   );
   if (!res.ok) throw new Error(`getShadowAgreement failed: ${res.status}`);
   const body = (await res.json()) as { skills: SkillAgreement[] };
   return body.skills;
+}
+
+export async function checkRunciterHealth(): Promise<boolean> {
+  if (isDemoModeActive()) return true;
+  try {
+    const res = await fetch(`${WORKER_URL}/healthz`);
+    return res.ok;
+  } catch {
+    return false;
+  }
 }

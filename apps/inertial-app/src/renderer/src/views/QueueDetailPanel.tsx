@@ -1,26 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronUp, X as CloseIcon } from "lucide-react";
 import type {
   AgentTrace,
-  ContentEvent,
-  EvidencePointer,
   ReviewItem,
   ReviewVerdict,
   StructuredSignal,
 } from "@inertial/schemas";
-import { ApproveRejectRow } from "../components/hitl/ApproveRejectRow.js";
 import { MiniTrace, type TraceStep } from "../components/hitl/MiniTrace.js";
 import { ChannelChip } from "../components/ChannelChip.js";
 import { ImageEvidence, type BboxOverlay } from "../components/ImageEvidence.js";
+import { AuthorBadge } from "../components/AuthorBadge.js";
+import { RelativeTime } from "../components/RelativeTime.js";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "../components/ui/card.js";
+import { Button } from "../components/ui/button.js";
+import { Separator } from "../components/ui/separator.js";
+import { Skeleton } from "../components/ui/skeleton.js";
 import { commitDecision, getEventDetail, type EventDetail } from "../lib/api.js";
 import { cn } from "../lib/utils.js";
 
 const REVIEWER = "ieuan@local";
-
-const QUEUE_BADGE: Record<ReviewItem["queue"], string> = {
-  quick: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30",
-  deep: "bg-amber-500/15 text-amber-300 ring-amber-500/30",
-  escalation: "bg-rose-500/15 text-rose-300 ring-rose-500/30",
-};
 
 interface QueueDetailPanelProps {
   item: ReviewItem;
@@ -77,143 +80,102 @@ export function QueueDetailPanel({ item, onCommit, onClose }: QueueDetailPanelPr
     }
   };
 
+  const decided = item.state === "decided";
+
   return (
-    <section className="flex h-full flex-col overflow-hidden rounded-lg border border-[color:var(--border)] bg-[color:var(--card)]">
-      <header className="flex items-center justify-between border-b border-[color:var(--border)] px-5 py-3">
-        <div className="flex items-center gap-3">
-          <span
-            className={cn(
-              "inline-flex w-fit items-center rounded-md px-2 py-0.5 text-xs font-medium uppercase tracking-wide ring-1 ring-inset",
-              QUEUE_BADGE[item.queue],
-            )}
-          >
-            {item.queue}
-          </span>
-          <span className="font-mono text-xs text-[color:var(--muted-foreground)]">
-            {item.contentEventId.slice(0, 8)}
-          </span>
-          <span className="text-xs text-[color:var(--muted-foreground)]">
-            · {item.recommendedAction.kind} — {item.recommendedAction.reason}
-          </span>
-        </div>
-        <button
-          onClick={onClose}
-          className="rounded-md border border-[color:var(--border)] px-2 py-1 text-xs text-[color:var(--muted-foreground)] hover:text-[color:var(--foreground)]"
-          title="Esc"
-        >
-          ✕
-        </button>
-      </header>
-
-      <div className="flex-1 overflow-y-auto px-5 py-4">
-        {loading && <SkeletonBody />}
-        {error && (
-          <p className="rounded-md border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-300">
-            {error}
-          </p>
-        )}
-        {detail && !loading && <DetailBody detail={detail} />}
-      </div>
-
-      <footer className="border-t border-[color:var(--border)] px-5 py-3">
+    <Card className="flex h-full flex-col gap-0 overflow-hidden border-0 bg-transparent p-0 shadow-none">
+      <div className="flex items-center gap-2 border-b border-border bg-muted/10 px-4 py-2">
         <textarea
           value={rationale}
           onChange={(e) => setRationale(e.target.value)}
-          placeholder="Rationale (optional — required for remove / escalate in production)"
-          rows={2}
-          className="mb-3 block w-full resize-none rounded-md border border-[color:var(--border)] bg-[color:var(--muted)] px-3 py-2 text-xs text-[color:var(--foreground)] placeholder:text-[color:var(--muted-foreground)]"
-          disabled={committing || item.state === "decided"}
+          placeholder="Rationale (optional)"
+          rows={1}
+          disabled={committing || decided}
+          className={cn(
+            "h-7 flex-1 resize-none rounded-md border border-input bg-background px-2.5 py-1 text-[12px] leading-tight",
+            "placeholder:text-muted-foreground",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            "disabled:cursor-not-allowed disabled:opacity-60",
+          )}
         />
-        <div className="flex items-center justify-between gap-3">
-          <ApproveRejectRow
-            state={
-              item.state === "decided"
-                ? item.finalVerdict === "remove"
-                  ? "rejected"
-                  : "approved"
-                : "pending"
-            }
-            onApprove={
-              item.state === "decided" || committing
-                ? undefined
-                : () => decide("approve")
-            }
-            onReject={
-              item.state === "decided" || committing
-                ? undefined
-                : () => decide("remove")
-            }
-          />
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => decide("escalate")}
-              disabled={committing || item.state === "decided"}
-              className="rounded-md border border-[color:var(--border)] px-3 py-1 text-xs uppercase tracking-widest text-[color:var(--muted-foreground)] hover:text-[color:var(--foreground)] disabled:opacity-50"
-              title="e"
-            >
-              Escalate
-            </button>
-            <span className="text-[10px] text-[color:var(--muted-foreground)]">
-              shortcuts:{" "}
-              <kbd className="rounded bg-[color:var(--muted)] px-1">a</kbd>{" "}
-              <kbd className="rounded bg-[color:var(--muted)] px-1">r</kbd>{" "}
-              <kbd className="rounded bg-[color:var(--muted)] px-1">e</kbd>{" "}
-              <kbd className="rounded bg-[color:var(--muted)] px-1">esc</kbd>
-            </span>
+        <Button
+          size="sm"
+          className="h-7 bg-emerald-600 px-2.5 text-[12px] text-white hover:bg-emerald-700"
+          disabled={committing || decided}
+          onClick={() => decide("approve")}
+        >
+          <Check className="mr-1 h-3 w-3" />
+          Approve
+        </Button>
+        <Button
+          size="sm"
+          variant="destructive"
+          className="h-7 px-2.5 text-[12px]"
+          disabled={committing || decided}
+          onClick={() => decide("remove")}
+        >
+          Remove
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2.5 text-[12px]"
+          disabled={committing || decided}
+          onClick={() => decide("escalate")}
+        >
+          Escalate
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onClose}
+          aria-label="Close detail panel"
+          title="Esc"
+          className="h-7 w-7 text-muted-foreground"
+        >
+          <CloseIcon className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4">
+        {loading && <SkeletonBody />}
+        {error && (
+          <div className="rounded-md border border-rose-500/30 bg-rose-500/5 p-3 text-sm text-rose-700 dark:text-rose-300">
+            {error}
           </div>
-        </div>
-      </footer>
-    </section>
+        )}
+        {detail && !loading && <DetailBody detail={detail} />}
+      </div>
+    </Card>
   );
 }
 
 function DetailBody({ detail }: { detail: EventDetail }) {
   const { event, signal, traces } = detail;
-
-  /** Group every emitted image-region evidence pointer by its mediaAssetId so
-   * each image renders with all the bboxes that point at it. */
-  const overlaysByMedia = useMemo(
-    () => buildOverlayMap(signal),
-    [signal],
-  );
+  const overlaysByMedia = useMemo(() => buildOverlayMap(signal), [signal]);
 
   return (
-    <div className="flex flex-col gap-5 text-sm">
-      <Section title="Event">
-        <Grid label="instance">
-          <span className="font-mono text-xs">{event.instance.id}</span>
-        </Grid>
-        <Grid label="author">
-          <span className="font-mono text-xs">
-            @{event.author.handle}
-            {event.author.priorActionCount > 0 && (
-              <span className="ml-2 text-rose-300">
-                ⚠ {event.author.priorActionCount} prior
-              </span>
-            )}
-          </span>
-        </Grid>
-        <Grid label="modalities">
-          <span className="font-mono text-xs">{event.modalities.join(", ")}</span>
-        </Grid>
-        <Grid label="posted">
-          <span className="font-mono text-xs text-[color:var(--muted-foreground)]">
-            {event.postedAt}
-          </span>
-        </Grid>
-      </Section>
+    <div className="flex flex-col gap-5">
+      <div className="flex items-start justify-between gap-3">
+        <AuthorBadge author={event.author} size="md" />
+        <RelativeTime
+          iso={event.postedAt}
+          className="shrink-0 text-xs text-muted-foreground tabular-nums"
+        />
+      </div>
 
       {event.text && (
-        <Section title="Text">
-          <p className="whitespace-pre-wrap rounded-md bg-[color:var(--muted)] p-3 font-mono text-xs leading-relaxed">
+        <div className="rounded-lg border border-border bg-muted/40 p-4">
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
             {event.text}
           </p>
-        </Section>
+        </div>
       )}
 
       {event.media.length > 0 && (
-        <Section title={`Media (${event.media.length})`}>
-          <div className="flex flex-wrap gap-3">
+        <div>
+          <SectionLabel>Media</SectionLabel>
+          <div className="mt-2 flex flex-wrap gap-3">
             {event.media.map((m) => (
               <div key={m.id}>
                 <ImageEvidence
@@ -221,24 +183,40 @@ function DetailBody({ detail }: { detail: EventDetail }) {
                   alt={`media ${m.id.slice(0, 8)}`}
                   bboxes={overlaysByMedia.get(m.id) ?? []}
                 />
-                <div className="mt-1 font-mono text-[10px] text-[color:var(--muted-foreground)]">
-                  {m.id.slice(0, 8)} · {m.modality} · {m.mimeType}
+                <div className="mt-1 font-mono text-[10px] text-muted-foreground">
+                  {m.modality} · {m.mimeType}
                   {m.width && m.height ? ` · ${m.width}×${m.height}` : ""}
                 </div>
               </div>
             ))}
           </div>
-        </Section>
+        </div>
       )}
 
+      {event.links.length > 0 && (
+        <div>
+          <SectionLabel>Links</SectionLabel>
+          <ul className="mt-2 space-y-1">
+            {event.links.map((l) => (
+              <li key={l} className="truncate font-mono text-xs text-muted-foreground">
+                {l}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <Separator />
+
       {signal && (
-        <Section title="Channels">
+        <div>
+          <SectionLabel>Channels</SectionLabel>
           {Object.values(signal.channels).length === 0 ? (
-            <p className="text-xs text-[color:var(--muted-foreground)]">
-              no channels emitted — agents ran but produced no signal
+            <p className="mt-2 text-xs text-muted-foreground">
+              no channels emitted
             </p>
           ) : (
-            <div className="flex flex-col gap-2">
+            <div className="mt-2 flex flex-col gap-2">
               {Object.values(signal.channels)
                 .sort((a, b) => b.probability - a.probability)
                 .map((ch) => (
@@ -246,84 +224,94 @@ function DetailBody({ detail }: { detail: EventDetail }) {
                 ))}
             </div>
           )}
-        </Section>
+        </div>
       )}
 
-      {traces.length > 0 && (
-        <Section title="Agent traces">
-          <div className="flex flex-col gap-3">
-            {traces.map((t) => (
-              <div key={`${t.agent}-${t.startedAt}`}>
-                <div className="mb-1 font-mono text-xs">
-                  {t.agent} · {t.model}
-                </div>
-                <MiniTrace steps={traceToSteps(t)} />
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
+      <div>
+        <SectionLabel>Event metadata</SectionLabel>
+        <dl className="mt-2 grid grid-cols-[8rem_1fr] gap-x-3 gap-y-1.5 text-xs">
+          <Row label="Instance">{event.instance.id}</Row>
+          <Row label="Source">{event.source}</Row>
+          <Row label="Modalities">{event.modalities.join(", ")}</Row>
+          <Row label="Posted">{event.postedAt}</Row>
+        </dl>
+      </div>
+
+      {traces.length > 0 && <TracesSection traces={traces} />}
     </div>
   );
 }
 
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
+function TracesSection({ traces }: { traces: AgentTrace[] }) {
+  const [expanded, setExpanded] = useState(false);
   return (
     <div>
-      <h3 className="mb-2 text-[10px] uppercase tracking-widest text-[color:var(--muted-foreground)]">
-        {title}
-      </h3>
-      <div className="space-y-1">{children}</div>
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center justify-between rounded-md hover:bg-muted/40 px-1 py-1"
+      >
+        <SectionLabel>Agent traces ({traces.length})</SectionLabel>
+        <ChevronUp
+          className={cn(
+            "h-3.5 w-3.5 text-muted-foreground transition-transform",
+            !expanded && "rotate-180",
+          )}
+        />
+      </button>
+      {expanded && (
+        <div className="mt-3 flex flex-col gap-3">
+          {traces.map((t, i) => (
+            <div key={`${t.agent}-${t.startedAt}-${i}`} className="rounded-md border border-border p-3">
+              <div className="mb-2 flex items-center justify-between text-xs">
+                <span className="font-mono">{t.agent}</span>
+                <span className="text-muted-foreground">{t.model}</span>
+              </div>
+              <MiniTrace steps={traceToSteps(t)} />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function Grid({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="grid grid-cols-[8rem_1fr] items-baseline gap-3">
-      <span className="text-[10px] uppercase tracking-widest text-[color:var(--muted-foreground)]">
-        {label}
-      </span>
-      <span>{children}</span>
+    <div className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+      {children}
     </div>
+  );
+}
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="font-mono text-foreground truncate">{children}</dd>
+    </>
   );
 }
 
 function SkeletonBody() {
   return (
-    <div className="flex flex-col gap-3">
-      <div className="h-3 w-32 animate-pulse rounded bg-[color:var(--muted)]" />
-      <div className="h-20 w-full animate-pulse rounded bg-[color:var(--muted)]" />
-      <div className="h-3 w-32 animate-pulse rounded bg-[color:var(--muted)]" />
-      <div className="h-32 w-full animate-pulse rounded bg-[color:var(--muted)]" />
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-3">
+        <Skeleton className="h-8 w-8 rounded-full" />
+        <Skeleton className="h-4 w-32" />
+      </div>
+      <Skeleton className="h-24 w-full rounded-md" />
+      <Skeleton className="h-3 w-24" />
+      <Skeleton className="h-32 w-full rounded-md" />
     </div>
   );
 }
 
-function buildOverlayMap(
-  signal: StructuredSignal | null,
-): Map<string, BboxOverlay[]> {
+function buildOverlayMap(signal: StructuredSignal | null): Map<string, BboxOverlay[]> {
   const map = new Map<string, BboxOverlay[]>();
   if (!signal) return map;
   for (const channel of Object.values(signal.channels)) {
     const severity =
-      channel.probability >= 0.8
-        ? "high"
-        : channel.probability >= 0.5
-          ? "medium"
-          : "low";
+      channel.probability >= 0.8 ? "high" : channel.probability >= 0.5 ? "medium" : "low";
     for (const ev of channel.evidence) {
       if (ev.kind !== "image-region") continue;
       const bbox: BboxOverlay = {
@@ -348,9 +336,7 @@ function traceToSteps(trace: AgentTrace): TraceStep[] {
         detail: s.rationale,
       };
     }
-    if (s.kind === "thought") {
-      return { type: "thought", label: s.content };
-    }
+    if (s.kind === "thought") return { type: "thought", label: s.content };
     if (s.kind === "tool-call") {
       return {
         type: "action",

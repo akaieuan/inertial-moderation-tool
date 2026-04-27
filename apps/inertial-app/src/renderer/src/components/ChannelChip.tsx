@@ -86,20 +86,20 @@ function channelSeverity(p: number): Severity {
 }
 
 const SEVERITY_BG: Record<Severity, string> = {
-  low: "bg-emerald-500/5",
-  medium: "bg-amber-500/10",
-  high: "bg-rose-500/10",
+  low: "bg-emerald-500/5 dark:bg-emerald-500/10",
+  medium: "bg-amber-500/10 dark:bg-amber-500/15",
+  high: "bg-rose-500/10 dark:bg-rose-500/15",
 };
 
 const SEVERITY_BORDER: Record<Severity, string> = {
-  low: "border-emerald-500/20",
-  medium: "border-amber-500/30",
-  high: "border-rose-500/40",
+  low: "border-emerald-500/30 dark:border-emerald-500/40",
+  medium: "border-amber-500/30 dark:border-amber-500/40",
+  high: "border-rose-500/40 dark:border-rose-500/50",
 };
 
 const SEVERITY_BAR: Record<Severity, string> = {
-  low: "bg-emerald-500/70",
-  medium: "bg-amber-500/80",
+  low: "bg-emerald-500/80",
+  medium: "bg-amber-500/85",
   high: "bg-rose-500/90",
 };
 

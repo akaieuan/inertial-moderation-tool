@@ -48,7 +48,7 @@ export function ImageEvidence({
         </div>
       )}
       {errored && (
-        <div className="flex h-48 w-full items-center justify-center px-4 text-center text-xs text-rose-300">
+        <div className="flex h-48 w-full items-center justify-center px-4 text-center text-xs text-rose-700 dark:text-rose-300">
           could not load image
         </div>
       )}
@@ -97,13 +97,13 @@ export function ImageEvidence({
 }
 
 const SEVERITY_BORDER: Record<NonNullable<BboxOverlay["severity"]>, string> = {
-  low: "border-emerald-400/70",
-  medium: "border-amber-400/80",
-  high: "border-rose-400/90",
+  low: "border-emerald-500",
+  medium: "border-amber-500",
+  high: "border-rose-500",
 };
 
 const SEVERITY_LABEL: Record<NonNullable<BboxOverlay["severity"]>, string> = {
-  low: "bg-emerald-500/90 text-white",
-  medium: "bg-amber-500/90 text-black",
-  high: "bg-rose-500/95 text-white",
+  low: "bg-emerald-600 text-white",
+  medium: "bg-amber-500 text-black",
+  high: "bg-rose-600 text-white",
 };

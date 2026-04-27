@@ -1,73 +1,51 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { AppShell } from "./components/AppShell.js";
+import type { Section } from "./components/Sidebar.js";
+import { DashboardView } from "./views/DashboardView.js";
 import { QueueView } from "./views/QueueView.js";
-import { EvalView } from "./views/EvalView.js";
+import { PipelinesView } from "./views/PipelinesView.js";
 import { ComplianceView } from "./views/ComplianceView.js";
-import { cn } from "./lib/utils.js";
+import { EvalView } from "./views/EvalView.js";
+import { SkillsView } from "./views/SkillsView.js";
+import { SettingsView } from "./views/SettingsView.js";
+import { listQueue } from "./lib/api.js";
+import { useDemoMode } from "./lib/demo-mode.js";
 
-type Tab = "queue" | "compliance" | "eval";
+const INSTANCE = "smoke.local";
 
 export function App() {
-  const [tab, setTab] = useState<Tab>("queue");
+  const [section, setSection] = useState<Section>("dashboard");
+  const [pendingCount, setPendingCount] = useState(0);
+  const { demo } = useDemoMode();
+
+  useEffect(() => {
+    let mounted = true;
+    const tick = async () => {
+      try {
+        const items = await listQueue(INSTANCE);
+        if (mounted) setPendingCount(items.filter((i) => i.state !== "decided").length);
+      } catch {
+        if (mounted) setPendingCount(0);
+      }
+    };
+    void tick();
+    if (demo) return;
+    const handle = setInterval(tick, 6_000);
+    return () => {
+      mounted = false;
+      clearInterval(handle);
+    };
+  }, [demo]);
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <header className="border-b border-[color:var(--border)] px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-light tracking-tight">inertial</h1>
-            <p className="text-xs uppercase tracking-widest text-[color:var(--muted-foreground)]">
-              moderator dashboard · pre-alpha
-            </p>
-          </div>
-          <nav className="flex gap-1 rounded-md border border-[color:var(--border)] bg-[color:var(--muted)] p-0.5">
-            <TabButton active={tab === "queue"} onClick={() => setTab("queue")}>
-              Queue
-            </TabButton>
-            <TabButton
-              active={tab === "compliance"}
-              onClick={() => setTab("compliance")}
-            >
-              Compliance
-            </TabButton>
-            <TabButton active={tab === "eval"} onClick={() => setTab("eval")}>
-              Eval
-            </TabButton>
-          </nav>
-        </div>
-      </header>
-      <main className="flex-1 overflow-auto p-6">
-        {tab === "queue" ? (
-          <QueueView />
-        ) : tab === "compliance" ? (
-          <ComplianceView />
-        ) : (
-          <EvalView />
-        )}
-      </main>
-    </div>
-  );
-}
-
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "rounded-sm px-3 py-1 text-sm transition-colors",
-        active
-          ? "bg-[color:var(--card)] text-[color:var(--foreground)]"
-          : "text-[color:var(--muted-foreground)] hover:text-[color:var(--foreground)]",
-      )}
-    >
-      {children}
-    </button>
+    <AppShell active={section} onChange={setSection} pendingCount={pendingCount}>
+      {section === "dashboard" && <DashboardView onNavigate={setSection} />}
+      {section === "queue" && <QueueView />}
+      {section === "pipelines" && <PipelinesView onNavigate={setSection} />}
+      {section === "skills" && <SkillsView />}
+      {section === "compliance" && <ComplianceView onNavigate={setSection} />}
+      {section === "insights" && <EvalView />}
+      {section === "settings" && <SettingsView />}
+    </AppShell>
   );
 }
