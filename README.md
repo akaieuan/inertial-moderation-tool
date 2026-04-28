@@ -1,8 +1,14 @@
 # inertial
 
-**Open-source AI content moderation with human-in-the-loop review.** Text + image + video moderation today (audio is stubbed). Built as a substrate other people can compose — heuristics, local classifiers, and cloud LLMs all run under one hash-chained audit log so every decision is replayable.
+**A reference architecture for auditable AI content review.** Not a deployable moderation service — a working demonstration of one architectural thesis, end-to-end through real code:
 
-The thesis: **AI moderation needs auditability end-to-end.** Most commercial APIs claim accuracy without proof and ship verdicts without evidence. `inertial` flips that — inertials emit *typed structured signals* (probability + confidence + evidence pointers), the policy engine routes them, and humans decide. Every signal, decision, and tag lands in a tamper-evident log.
+> *AI classification outputs and human review actions should both land in a hash-chained audit log, with typed structured signals as the unit of evidence and per-instance YAML as the unit of policy.*
+
+What's real: schema-first Zod contracts across 12+ shapes, a skill/tool registry with a catalog + per-instance registration table, a YAML policy evaluator with hash-chained `/verify`, an eval harness scoring per-(skill, channel) Brier/ECE/agreement, a reviewer-tag layer with per-modality / per-segment scope, and a reviewer dashboard wired to all of it.
+
+What's stubbed (deliberately): every source connector (Mastodon, Bluesky, Lemmy, Discord, Slack), the action dispatcher that pushes decisions back to source platforms, all `agents-*` packages except text + context, audio entirely, and any auth / observability layer. The architecture diagram below documents the *target* shape; what runs today is a verification substrate with a reference UI on top.
+
+This is portfolio work, not a maintained OSS project. The point is the architecture choices and where they hold up, not feature completeness.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-brightgreen.svg)](#)
@@ -10,7 +16,7 @@ The thesis: **AI moderation needs auditability end-to-end.** Most commercial API
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue.svg)](#)
 [![Status](https://img.shields.io/badge/status-pre--alpha-red.svg)](#)
 
-> **Status — pre-alpha.** The kernel is real and tested. The agent and connector roster is sparse. APIs will change.
+> **Status — reference architecture, not deployable.** Schemas, audit chain, eval harness, skill registry, and reviewer dashboard are real and tested. Connectors are stubbed. Action dispatch is unimplemented. No auth. The 31-event gold set is too small for statistical claims; it's there to demonstrate the calibration math, not to certify any skill's accuracy.
 
 `inertial` is two things in one monorepo:
 
@@ -89,25 +95,27 @@ The right rail extends edge-to-edge from the top of the window. The Chat panel m
 
 ---
 
-## Why inertial exists
+## Why I built this
 
-Both federated platforms (Mastodon, Bluesky, Lemmy) and centralized ones (Discord, Slack, custom B2B tools) hit the same wall with AI moderation: a vendor or model makes a black-box call, a human ends up rubber-stamping it (or fighting it), and nobody can prove what actually happened. Federated mods distrust commercial AI specifically because it's unauditable; centralized teams need defensible records for compliance. Both want the same thing — *evidence-rich decisions* — and neither has it.
+Commercial moderation APIs claim accuracy without proof and ship verdicts without evidence. Federated mods distrust them because they can't audit them; centralized compliance teams need defensible records they can show regulators. Both want decomposed, evidence-rich decisions; neither has them.
 
-`inertial` is the substrate that makes that possible. It treats AI as a decomposed *signal generator* rather than a verdict-maker:
+I wanted to know: what would a *substrate* for that look like — schemas, audit log, skill registry, eval harness, reviewer surface — wired together end-to-end with real code rather than a slide-deck. So I built it. The thesis is:
 
-- **Inertials (sub-agents) emit typed structured signals** (probability + confidence + evidence pointers), not "remove this post."
-- **A per-instance policy engine** turns signals into routing decisions (queue.quick, queue.deep, escalate). Each instance brings its own YAML.
-- **Reviewers see the signals, the inertial's reasoning trace, and the policy rule that fired** — then they decide. Their decision becomes a hash-chained audit entry that grows the eval gold set automatically.
-- **Per-skill privacy posture is part of the schema.** A skill is either `dataLeavesMachine: true` (Tier 3 cloud) or false (Tier 0/1 local) — there's no fudging. The audit log records which model saw which event so "no remote API touched my instance for 30 days" becomes a SQL query, not a vendor promise.
+- **Inertials (sub-agents) emit typed structured signals**, not verdicts. Probability + confidence + evidence pointers. The policy layer turns signals into routing; humans turn routing into actions.
+- **Per-instance YAML policy** so federation is a first-class case, not an afterthought. The same code serves "wide-open community" and "high-compliance enterprise" because the operator brings their own rules.
+- **Per-skill privacy posture lives in the schema.** A skill is either `dataLeavesMachine: true` or false. The audit chain records which model saw which event so "no remote API touched my instance for 30 days" becomes a SQL query, not a vendor promise.
+- **Reviewer decisions auto-promote into the eval gold set.** Every commit grows the calibration corpus by one structured row, so the system improves at measuring itself.
 
-Skills compose. A no-budget instance can run heuristics + local text-toxicity only and accept it doesn't get image moderation; a funded operator enables Claude Vision + Voyage embeddings and gets full coverage. Both flow through the same code, the same dashboard, the same review queue. **The architecture refuses to lie about local capability** — small models lie about minor-detection or video understanding, so we don't ship local versions of those at all. Cloud is opt-in per skill, every call is audited, and the operator decides what data leaves their machine.
+That thesis — verification substrate, not vendor API — is what's actually built and demonstrated end-to-end.
 
-### What this is NOT
+### What this is NOT, in plain language
 
-- **Not a hosted moderation API.** No SaaS, no managed cloud. Self-host or don't use it.
-- **Not a model.** `inertial` doesn't train anything; it composes existing classifiers (toxic-bert, Claude, Voyage) under typed contracts.
-- **Not an action dispatcher to source platforms.** Approve / Remove / Escalate land in the audit log; pushing actions back to Mastodon / Bluesky / Discord is its own connector-side work, in flight.
-- **Not a 95%-accurate-out-of-the-box claim.** The 30-event gold set is a starter; per-channel sample sizes are too small to be statistically meaningful. The eval harness exists so YOU bring your own gold set + measure against it.
+- **Not a deployable moderation service.** No connectors to source platforms. No action dispatcher pushing changes back. No auth on the HTTP surface. Don't run this in front of any real instance.
+- **Not a model.** Composes existing classifiers (toxic-bert, Claude, Voyage) under typed contracts. Does not train anything.
+- **Not statistically validated.** The 31-event gold set demonstrates the calibration math is correct; per-channel sample sizes (1-15) are too small to make any actual claim about any skill's real-world accuracy.
+- **Not multimodal in the way that phrase usually means.** Audio is fully unimplemented. Video is keyframe extraction plus per-frame image classification — no temporal reasoning, no audio track, no scene-change detection.
+- **Not a complete moderation toolkit.** The dashboard, audit log, eval harness, and skill registry are real. Six of the seven `@inertial/agents-*` packages are stubs. Two of the four planned connector packages don't even have a placeholder.
+- **Not a maintained OSS project.** No CONTRIBUTING.md, no issue templates, no triage commitment. If you want to use any of this, fork it.
 
 ---
 
@@ -162,9 +170,9 @@ Every box has a corresponding `@inertial/*` package. Every cross-package shape i
 
 ---
 
-## Choose your tier
+## Skill tiers (what's actually demonstrated)
 
-`inertial` doesn't pick for you. The four tiers compose in any combination, configured per-instance.
+The architecture supports four execution tiers. **Today, only two are exercised.** Tier 2 (local server / Ollama) has no skill implementations; Tier 0 has one (regex URL detection). Below is the honest mapping of tier → what ships, not what could theoretically run.
 
 | Tier | Where it runs | Install | What ships today |
 |---|---|---|---|
@@ -193,11 +201,13 @@ Local-first is not a magic bullet. **For high-stakes content (minor detection, v
 
 ---
 
-## Quick start (no Docker, no API keys)
+## Run the demo locally
 
-Requires Node ≥20 and pnpm 10. The text + dashboard path needs no other deps.
+This boots the full pipeline against an in-memory pglite + 10 hand-crafted events. No real ingestion happens; there's no source connector. You're running the verification substrate against synthetic input to see what the audit log, eval harness, and dashboard look like wired together.
 
-**Optional** — for the cloud and video skills you'll want one or more of:
+Requires Node ≥20 and pnpm 10. The text path needs no other deps.
+
+**Optional** — to exercise the cloud and video skills you'll want one or more of:
 
 | Want | Install / set |
 |---|---|
@@ -306,7 +316,9 @@ the actual results above).
 
 ## What's actually working today
 
-Be honest about pre-alpha state.
+Two tables. The first is what runs. The second is what doesn't and why it matters. The gap between them is the gap between "verification substrate" and "moderation tool."
+
+### Real
 
 | Component | Status |
 |---|---|
@@ -326,6 +338,23 @@ Be honest about pre-alpha state.
 | `connectors-{activitypub,atproto,lemmy,sdk-webhook}` | Stubbed. |
 | `@inertial/agents-cloud` | Real. Anthropic text-toxicity + image-NSFW + Voyage embeddings — all factory-shaped so per-instance API keys work via the catalog. |
 | `pnpm eval` | Real. Boots an in-memory pipeline, runs the gold set against the live skill registry, prints per-(skill, channel) Brier / ECE / agreement, exits non-zero on regressions when `EVAL_BRIER_THRESHOLD` is set. |
+
+### Not real (and what each gap blocks)
+
+| Missing | Why it matters |
+|---|---|
+| **Source connectors** (ActivityPub / AT Protocol / Lemmy / Discord / Slack / webhook). All four `@inertial/connectors-*` packages contain stub interfaces with zero ingestion logic. | Without these, no real platform's events ever reach the runciter. The system can only process events posted directly to `POST /v1/events` by a script. This is the single biggest gap between this project and a moderation tool. |
+| **Action dispatcher** to source platforms. Reviewer commits land in the audit log; nothing pushes Approve / Remove / Limit back to Mastodon / Bluesky / Discord. | A moderation system that can't act on its decisions is a logging system. |
+| **Authentication / authorization** on the runciter HTTP surface. Anyone who can reach `localhost:4001` can `POST /v1/skills/registrations`, kick off eval runs, or delete review items. | Don't run this in front of any real instance. |
+| **Audio inertials of any kind.** No transcription, no audio classification, no even-stub package beyond `@inertial/agents-audio` returning `[]`. | "Multimodal" is overstated — text + image + frame-grabbed-video only. |
+| **Real video understanding.** The `VideoAgent` extracts keyframes via ffmpeg and runs the existing image classifier on each. There is no temporal reasoning, no audio track, no scene-change detection, no live stream support. | Calling this a "video pillar" is a pattern claim, not a capability claim. Honest framing: "video keyframe extraction skill that lets image classifiers generalize to video files." |
+| **Statistically meaningful gold set.** 31 hand-labeled events with 1-15 samples per channel. Brier scores in the 0.02-0.15 range are arithmetically correct and statistically nothing. | Every calibration number in the README and dashboard demonstrates the math is plumbed; none of them tell you whether any skill is actually well-calibrated in production. The reviewer-derived auto-promotion path can grow this corpus organically once real reviewer activity happens — it has not. |
+| **Observability / logging / metrics.** No structured logs (just `console.log("[runciter] ...")`), no `/metrics` endpoint, no error tracking, no tracing. | Operating this in any non-dev context is flying blind. |
+| **Backup / restore / migration rollback** for the production Postgres path. Drizzle migrations are committed; nothing automates restore. | Same gap. |
+| **End-to-end integration tests** that boot gateway + runciter + dashboard and run an event from POST → audit → review → audit-verify. Each layer is unit-tested in isolation; the seams are not. | A real bug will live between layers, not in any one layer. |
+| **A second registered skill per Tier 2.** Ollama integration is in flight but not implemented; nothing exercises Tier 2 today. | The "four-tier" architecture story is real at the schema level, partial at the code level. |
+
+The skill catalog + registrations table + hot-toggle CRUD + audit chain + boot-time loader is **shaped for ~50 skills**. With ~7 actual skills it's correct-pattern, oversized-scope. That's a deliberate "ready to grow" stance, but if you're scanning for honest signals, this is one of them: the infra outsizes the live use case.
 
 ---
 
@@ -469,9 +498,9 @@ Conditions form a tree: leaf (`channel + op + value` or `entity + present`), `al
 
 ## Roadmap
 
-The kernel is real; the agent + connector roster is sparse on purpose. The roadmap is split into pillars so you can tell what's load-bearing today vs. what's in flight.
+This is the order pillars landed during the build, not a commitment to keep building. Each pillar is scoped honestly — "what landed" is what runs, not what could exist.
 
-### Shipped
+### Shipped (substrate work)
 
 | Pillar | What landed | Why it matters |
 |---|---|---|
@@ -484,15 +513,22 @@ The kernel is real; the agent + connector roster is sparse on purpose. The roadm
 | **Skills + tools layer** | Skill / tool registries in `@inertial/core`, `SKILL_CATALOG` of installable modules, `skill_registrations` persistence, dashboard catalog picker + per-instance hot toggle, factory-shaped cloud skills, `db.author.list-history` + `db.events.find-similar` + `db.embeddings.get` tools | Adding a skill becomes a registration row, not a code change. The reviewer can wire Voyage / Anthropic / etc. without touching YAML. |
 | **Context engine** | `ContextAgent` composing `text-context-author@local` + `text-context-similar@local`. Voyage embeddings populate `event_embeddings` inline on every text-bearing event. Author history + similar events surface in the queue detail panel. | "Has this user done this before? Has anything like this happened before?" answered for every queued item. |
 | **Eval harness + reviewer-tagged corpus** | `@inertial/eval` (Brier / ECE / agreement scoring), `gold_events` + `eval_runs` + `skill_calibrations` tables, JSONL gold-set v1 (30 hand-labeled cases), `pnpm eval` CLI with summary table, runciter `/v1/eval/runs` endpoints, Insights tab live, **reviewer-tag layer** (`TAG_CATALOG`, `reviewer_tags` table, per-modality / per-segment scoping, in-line tag picker on every queued item) | Calibration becomes hash-chained, not vibes. Every reviewer commit grows the gold set automatically (auto-promotion). The "good video bad audio" mixed-validity case gets a precise label, not a whole-asset verdict. |
-| **Video moderation (v1: keyframes)** | `video-frame-extract@local` skill (system ffmpeg), `VideoAgent` composing extract → image-classify on each frame, `video-segment` evidence with `keyframeUrl`, dashboard `<VideoFramesSection>` rendering per-keyframe scores in a horizontal strip | Video joins the substrate as just-another-modality. The architecture's claim — "video is a sequence of images, our image skills generalize" — holds in practice. ffmpeg is opt-in (`brew install ffmpeg`) so the text-only quick-start path stays clean. |
+| **Video keyframe extraction (not video understanding)** | `video-frame-extract@local` skill (system ffmpeg), `VideoAgent` composing extract → image-classify on each frame, `video-segment` evidence with `keyframeUrl`, dashboard `<VideoFramesSection>` rendering per-keyframe scores. **No temporal reasoning, no audio, no scene-change detection, no live-stream support.** | Demonstrates that the architecture handles a new modality by composing existing skills (image classifier per-frame). Honest framing: "image moderation with auto-frame-grab," not video understanding. |
 
-### In flight
+### Not built — what would be needed for this to become deployable
 
-- **Video deep (v2).** Whisper-local audio transcription → existing text skills, Gemini multi-frame for temporal reasoning, audio-only stream support.
-- **More inertials.** `vision-ollama` (LLaVA / qwen2.5-vl), `phash-similarity`, expanded `@inertial/agents-cloud` (OpenAI, Gemini).
-- **Pipeline stages with budgets.** Per-modality cost caps, confidence-based escalation: cheap triage inertials short-circuit when confident; only the ambiguous middle goes to cloud.
-- **Real connectors.** ActivityPub / AT Protocol firehose subscribers.
-- **Tag-aware skills.** A `text-context-precedent@rag` skill that calls a `db.tags.find-similar` tool and surfaces "5 prior cases tagged `audio.harassment`, reviewers went 4 remove / 1 escalate" as in-context evidence for cloud skills.
+These aren't in any active queue; they're the gaps a careful reviewer should know exist.
+
+- **Source connectors.** ActivityPub / AT Protocol firehose subscribers, Discord bot ingest, Slack event API, generic webhook receiver. Without one of these, no real platform's events reach the system.
+- **Action dispatcher.** Push reviewer commits back to source platforms (Mastodon API, Bluesky, Discord, etc). Without this, the system is logging-only.
+- **Auth + observability.** Bearer-token (or session-cookie) auth on the runciter HTTP surface. Structured logging via pino. `/metrics` endpoint. Error tracking integration. Without these, this is dev-only.
+- **Statistically meaningful gold set.** The hand-labeled set needs to grow from 31 to ~1,000+ events with ≥30 samples per channel before any calibration claim is statistically meaningful. The reviewer-derived auto-promotion path can do this in production but hasn't.
+- **End-to-end integration tests.** Unit tests cover each layer in isolation; nothing tests gateway → runciter → DB → dashboard as one flow.
+- **Audio of any kind.** Currently zero implementation. Whisper-local transcription → existing text skills is the obvious path, not built.
+- **Real video understanding.** Gemini multi-frame for temporal reasoning, audio track integration, scene-change detection, live-stream segmentation.
+- **More inertials.** `vision-ollama` (Tier 2), `phash-similarity` (Tier 0), expanded `@inertial/agents-cloud` (OpenAI moderation, Gemini).
+- **Pipeline stages with budgets.** Per-modality cost caps, confidence-based escalation routing.
+- **Tag-aware skills.** A `text-context-precedent@rag` skill calling `db.tags.find-similar` to surface reviewer-tag precedents as in-context evidence for cloud classifiers. The tag corpus exists; nothing reads it as RAG yet.
 
 ### Sibling kits
 
