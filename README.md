@@ -1,6 +1,8 @@
 # inertial
 
-**Open-source AI content moderation with human-in-the-loop review.** Multimodal across text, image, video, and audio. Built for federated platforms (Mastodon, Bluesky, Lemmy) and centralized ones (Discord, Slack, custom apps). Compose any agent stack — heuristics, local models, cloud LLMs — under one auditable pipeline that keeps humans in authority.
+**Open-source AI content moderation with human-in-the-loop review.** Text + image + video moderation today (audio is stubbed). Built as a substrate other people can compose — heuristics, local classifiers, and cloud LLMs all run under one hash-chained audit log so every decision is replayable.
+
+The thesis: **AI moderation needs auditability end-to-end.** Most commercial APIs claim accuracy without proof and ship verdicts without evidence. `inertial` flips that — inertials emit *typed structured signals* (probability + confidence + evidence pointers), the policy engine routes them, and humans decide. Every signal, decision, and tag lands in a tamper-evident log.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-brightgreen.svg)](#)
@@ -47,7 +49,11 @@ The Quick / Deep / Escalation queues live side by side. Each card is one pending
 
 ![Queue page with three deck columns](docs/screenshots/queue.png)
 
-![Queue review session — inline deck flip-through](docs/screenshots/queue-review.png)
+The detail panel surfaces every signal the runciter generated: channel chips with per-channel evidence, **reviewer tags** with per-modality / per-segment scope (Add tag opens a popover catalog filtered to the event's modalities), a **video frames** strip when the event is video (thumbnails with timestamp overlays + top-channel score per keyframe), **author history** with verdict pills, and **similar events** (top-K cosine-similar past events via Voyage embeddings + pgvector).
+
+Approve / Remove / Escalate commits a `ReviewDecision` + every applied tag into the hash-chained audit log. Tags auto-promote into the gold set as `reviewer-derived` rows, so the eval corpus grows on every commit.
+
+![Queue review session — channels + reviewer tags + similar events](docs/screenshots/queue-review.png)
 
 ### Pipelines — wire up your dispatch flow
 
@@ -69,11 +75,11 @@ Per-skill shadow agreement (how often each silent skill agreed with the human) p
 
 ![Compliance page with shadow agreement + audit feed](docs/screenshots/compliance.png)
 
-### Insights — calibration & drift
+### Insights — calibration & reviewer-tagged corpus
 
-Brier / ECE per inertial, gold-set coverage, recent regressions. Where you check whether the model still knows what it's doing.
+Per-skill Brier / ECE / agreement against the gold set, the reviewer-tag corpus that grows on every commit decision, and an eval-runs history. The "Run eval" button kicks off a live calibration pass against the active skill registry.
 
-![Insights page with calibration table + coverage donut](docs/screenshots/insights.png)
+![Insights page with calibration table + tag corpus + run history](docs/screenshots/insights.png)
 
 ### Side panels — chat, notes, agent activity
 
@@ -85,29 +91,23 @@ The right rail extends edge-to-edge from the top of the window. The Chat panel m
 
 ## Why inertial exists
 
-Online platforms have an AI-moderation problem and a human-trust problem at the same time:
+Both federated platforms (Mastodon, Bluesky, Lemmy) and centralized ones (Discord, Slack, custom B2B tools) hit the same wall with AI moderation: a vendor or model makes a black-box call, a human ends up rubber-stamping it (or fighting it), and nobody can prove what actually happened. Federated mods distrust commercial AI specifically because it's unauditable; centralized teams need defensible records for compliance. Both want the same thing — *evidence-rich decisions* — and neither has it.
 
-- **Federated platforms** (Mastodon, Bluesky, Lemmy) have a real, expensive moderation crisis and almost no shared infrastructure. Admins burn out triaging spam, brigading, hate speech, and worse on duct-taped tooling. Each instance reinvents the wheel — and most of them flat-out distrust commercial AI, often *because* they left centralized platforms to escape it.
-- **Centralized platforms** (Discord communities, corporate Slack, B2B tools) have moderation, but it's opaque, vendor-locked, and routes every post through a remote LLM whether the operator wants it or not. Reviewers can't see *why* the AI flagged something, can't tune it, and can't prove their decisions to legal/compliance.
+`inertial` is the substrate that makes that possible. It treats AI as a decomposed *signal generator* rather than a verdict-maker:
 
-The pattern is the same in both worlds: an AI makes a black-box call, a human ends up rubber-stamping it (or fighting it), and nobody can audit what actually happened.
+- **Inertials (sub-agents) emit typed structured signals** (probability + confidence + evidence pointers), not "remove this post."
+- **A per-instance policy engine** turns signals into routing decisions (queue.quick, queue.deep, escalate). Each instance brings its own YAML.
+- **Reviewers see the signals, the inertial's reasoning trace, and the policy rule that fired** — then they decide. Their decision becomes a hash-chained audit entry that grows the eval gold set automatically.
+- **Per-skill privacy posture is part of the schema.** A skill is either `dataLeavesMachine: true` (Tier 3 cloud) or false (Tier 0/1 local) — there's no fudging. The audit log records which model saw which event so "no remote API touched my instance for 30 days" becomes a SQL query, not a vendor promise.
 
-**inertial is the human-in-the-loop AI moderation layer that fixes both.** It treats the AI as a decomposed *signal generator*, not a verdict-maker:
+Skills compose. A no-budget instance can run heuristics + local text-toxicity only and accept it doesn't get image moderation; a funded operator enables Claude Vision + Voyage embeddings and gets full coverage. Both flow through the same code, the same dashboard, the same review queue. **The architecture refuses to lie about local capability** — small models lie about minor-detection or video understanding, so we don't ship local versions of those at all. Cloud is opt-in per skill, every call is audited, and the operator decides what data leaves their machine.
 
-- Inertials (sub-agents) emit *typed structured signals* (probability + confidence + evidence pointers), not "remove this post"
-- A per-instance policy engine turns signals into routing decisions (queue.quick, queue.deep, escalate)
-- Reviewers see the signals, the inertial's reasoning trace, and the policy rule that fired — then they decide
-- Every decision and signal lands in a hash-chained audit log; tampering is detectable, compliance is provable
+### What this is NOT
 
-And because moderators have wildly different privacy budgets, inertial lets them compose:
-
-- **Heuristics** — regex, perceptual hash matching, blocklists. Zero cost, zero data leaves the machine.
-- **Small local models — *only where they earn it***. Text toxicity classification (toxic-bert, in-process via transformers.js) is a bounded enough task that local is honest. We **do not** ship local image-NSFW, video, audio-reasoning, or cross-event classifiers — small models lie about their capability on those tasks, and false confidence on minor-detection or video understanding is worse than no signal at all.
-- **Cloud LLMs — the workhorse for non-trivial moderation.** Image (Claude Vision), eventually video (Gemini multi-frame), nuanced/coded text (Claude Sonnet), cross-event reasoning. Opt-in per rule, with budget caps. The only tier where data leaves the machine — and every call is logged.
-
-…in a single auditable pipeline. The audit log records which model saw which event, so a federated mod can prove "no remote API touched my instance over the last 30 days" — not as a promise, as a hash-chained artifact.
-
-Same toolkit, different points on the curve. A no-budget instance runs heuristics + local text-toxicity only and accepts that they don't get image moderation; a funded operator enables cloud skills and gets full coverage. Both flow through the same code, the same dashboard, the same review queue. **The architecture refuses to lie about local capability** — there is no "fake" local image classifier that pretends to do what only a frontier model can.
+- **Not a hosted moderation API.** No SaaS, no managed cloud. Self-host or don't use it.
+- **Not a model.** `inertial` doesn't train anything; it composes existing classifiers (toxic-bert, Claude, Voyage) under typed contracts.
+- **Not an action dispatcher to source platforms.** Approve / Remove / Escalate land in the audit log; pushing actions back to Mastodon / Bluesky / Discord is its own connector-side work, in flight.
+- **Not a 95%-accurate-out-of-the-box claim.** The 30-event gold set is a starter; per-channel sample sizes are too small to be statistically meaningful. The eval harness exists so YOU bring your own gold set + measure against it.
 
 ---
 
@@ -166,32 +166,46 @@ Every box has a corresponding `@inertial/*` package. Every cross-package shape i
 
 `inertial` doesn't pick for you. The four tiers compose in any combination, configured per-instance.
 
-| Tier | Where it runs | Install | Best at | Privacy |
-|---|---|---|---|---|
-| **0. Heuristic** | In-process JS | nothing | URL spam, known-bad image phash, blocklists | Total — no model, no network |
-| **1. Local WASM** | `@huggingface/transformers` ONNX runtime | nothing — model auto-downloads to `~/.cache/huggingface/hub` | Text toxicity, NER, image NSFW, Whisper transcription | Total — local-only after first download |
-| **2. Local server** | Ollama daemon at `localhost:11434` | `brew install ollama && ollama pull llama3.2-vision` | Better text reasoning, multimodal vision-language | Total |
-| **3. Cloud** | Anthropic / OpenAI / Google APIs | `@inertial/agents-cloud` package (separate, opt-in) + API key | Subtle / coded text, video temporal reasoning, multi-event context | Up to operator |
+| Tier | Where it runs | Install | What ships today |
+|---|---|---|---|
+| **0. Heuristic** | In-process JS | nothing | `text-detect-spam-link` (regex URL detection) |
+| **1. Local WASM** | `@huggingface/transformers` ONNX runtime | nothing — model auto-downloads to `~/.cache/huggingface/hub` | `text-classify-toxicity@local` (toxic-bert) |
+| **2. Local server** | Ollama daemon at `localhost:11434` | `brew install ollama && ollama pull llama3.2-vision` | nothing yet — planned for the in-flight `vision-ollama` work |
+| **3. Cloud** | Anthropic / Voyage / (future) OpenAI / Gemini | `@inertial/agents-cloud` package + per-skill API key wired through the dashboard catalog | `text-classify-toxicity@anthropic`, `image-classify@anthropic`, `text-embed@voyage`, **video frame-by-frame** (extract via local ffmpeg → image-classify@anthropic per keyframe) |
+
+Privacy posture is per-skill: Tier 0/1 never leave the machine; Tier 3 always does. The audit log records which model saw which event, so a federated mod can prove "no remote API touched my instance over the last 30 days" — not as a promise, as a hash-chained artifact.
 
 ### Honest capability matrix
 
+What's actually working today, by modality:
+
 | Modality | Tier 0 | Tier 1 | Tier 2 | Tier 3 |
 |---|---|---|---|---|
-| Text spam | full | full | full | full |
-| Text toxicity | blocklist only | ~70% | ~75% | ~90% |
-| Audio | none | Whisper transcribe → text classify (~70%) | same | same + better acoustic |
-| Image NSFW | phash known-bad only | ~70% on obvious | ~80% | ~85% |
-| Image: minor / intent / adversarial | none | poor | medium | ~80% |
-| Video temporal reasoning | phash on keyframes only | frame-by-frame at best | frame-by-frame | ~75% with multi-frame context |
-| Cross-event ("is this brigading?") | none | none | none | only Tier 3 |
+| Text — spam links | full | full | — | — |
+| Text — toxicity | — | ~70% (toxic-bert) | — | ~90% (Claude) |
+| Image — NSFW / violence / minor / self-harm | — | — | — | ~85% (Claude Vision) |
+| Video — frame-level | phash on keyframes (planned) | — | — | ffmpeg keyframe extract → Claude Vision per-frame |
+| Video — temporal reasoning across frames | — | — | — | planned for v2 (Gemini multi-frame) |
+| Audio | — | — | — | — (planned: Whisper transcribe → text classify) |
+| Cross-event ("is this brigading?") | — | — | — | partial (`db.events.find-similar` via Voyage embeddings) |
 
-Local-first is not a magic bullet. **For high-stakes content (minor detection, video understanding, coordinated attacks), cloud is currently the only adequate tier.** The point of inertial isn't to replace cloud — it's to make the routing legible and the data flow auditable.
+Local-first is not a magic bullet. **For high-stakes content (minor detection, video understanding, audio harassment, coordinated attacks), cloud is currently the only adequate tier — and audio is unimplemented entirely.** The point of inertial isn't to replace cloud — it's to make the routing legible and the data flow auditable.
 
 ---
 
 ## Quick start (no Docker, no API keys)
 
-Requires Node ≥20 and pnpm 10.
+Requires Node ≥20 and pnpm 10. The text + dashboard path needs no other deps.
+
+**Optional** — for the cloud and video skills you'll want one or more of:
+
+| Want | Install / set |
+|---|---|
+| Text + image moderation via Claude | `ANTHROPIC_API_KEY` |
+| Similar-events context (`db.events.find-similar`) | `VOYAGE_API_KEY` ([free tier](https://www.voyageai.com/)) |
+| Video keyframe extraction | `brew install ffmpeg` (or apt/yum equivalent) |
+
+Each is optional; missing keys / binaries are detected at boot, the relevant skill is skipped with a clear log line, and other modalities still work.
 
 ```bash
 git clone https://github.com/akaieuan/inertial-moderation-tool inertial
@@ -256,21 +270,21 @@ Calibration is a hash-chained artifact, not vibes. From the repo root:
 pnpm eval
 ```
 
-Boots an in-memory pipeline, dispatches the 30-event hand-labeled gold set
-(`config/evals/gold-set-v1.jsonl`) through the live skill registry, and
-prints per-(skill, channel) Brier / ECE / agreement:
+Boots an in-memory pipeline, dispatches the 31-event hand-labeled gold set
+(`config/evals/gold-set-v1.jsonl` — 30 text + 1 video) through the live
+skill registry, and prints per-(skill, channel) Brier / ECE / agreement:
 
 ```
 skill                                  channel                  brier     ece   agree  samples
 ────────────────────────────────────── ────────────────────── ─────── ─────── ─────── ────────
-text-classify-toxicity@local           toxic                   0.0330  0.0888    0.93       30
-text-classify-toxicity@local           insult                  0.0421  0.0604    0.90       30
-text-classify-toxicity@local           obscene                 0.0345  0.0596    0.90       30
-text-classify-toxicity@local           threat                  0.0241  0.0291    0.97       30
-text-context-author@local              context.author-prior-…  0.1480  0.1933    0.83       30
-text-detect-spam-link                  spam-link-presence      0.0213  0.0267    0.97       30
+text-classify-toxicity@local           toxic                   0.0330  0.0888    0.93       31
+text-classify-toxicity@local           insult                  0.0421  0.0604    0.90       31
+text-classify-toxicity@local           obscene                 0.0345  0.0596    0.90       31
+text-classify-toxicity@local           threat                  0.0241  0.0291    0.97       31
+text-context-author@local              context.author-prior-…  0.1480  0.1933    0.83       31
+text-detect-spam-link                  spam-link-presence      0.0213  0.0267    0.97       31
 ────────────────────────────────────── ────────────────────── ─────── ─────── ─────── ────────
-6 (skill, channel) row(s) | scored: 30 | unresolved: 0 | failed: 0 | mean latency: 8ms
+6 (skill, channel) row(s) | scored: 31 | unresolved: 0 | failed: 0 | mean latency: 10ms
 ```
 
 The gold set grows organically: every reviewer commit decision's
@@ -283,7 +297,7 @@ Cloud skills are skipped by default (free + fast in CI). Set
 Set `EVAL_BRIER_THRESHOLD=0.15` to fail CI on regressions.
 
 The script prints a machine-parseable final line —
-`[eval] result=ok scored=30 skipped=0 rows=6` — so CI can grep for success
+`[eval] result=ok scored=31 skipped=0 rows=6` — so CI can grep for success
 even when Node's exit on macOS races with `@huggingface/transformers`'s
 WASM thread teardown (a cosmetic libc++abi message that doesn't affect
 the actual results above).
