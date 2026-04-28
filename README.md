@@ -307,7 +307,8 @@ Be honest about pre-alpha state.
 | `text-regex` (Tier 0) | Real. URL detection via skill `text-detect-spam-link`. |
 | `text-toxicity-local` (Tier 1) | Real. `Xenova/toxic-bert` via transformers.js. ~50ms/event after warmup. |
 | `text-context-author@local` + `text-context-similar@local` | Real. Context skills via `db.author.list-history` + `db.events.find-similar` tools. |
-| `vision-*`, `video-*`, `audio-*`, `identity-*` inertials | Stubbed. Empty `analyze()` returning `[]`. |
+| `video-frame-extract@local` + `VideoAgent` | Real. System ffmpeg keyframe extraction; composes any registered image classifier per-frame; emits `video-segment` evidence the dashboard renders as a thumbnail strip. Skipped at boot when ffmpeg is missing. |
+| `vision-*`, `audio-*`, `identity-*` inertials | Stubbed. Empty `analyze()` returning `[]`. (Cloud vision works via `image-classify@anthropic` from `@inertial/agents-cloud`.) |
 | `connectors-{activitypub,atproto,lemmy,sdk-webhook}` | Stubbed. |
 | `@inertial/agents-cloud` | Real. Anthropic text-toxicity + image-NSFW + Voyage embeddings — all factory-shaped so per-instance API keys work via the catalog. |
 | `pnpm eval` | Real. Boots an in-memory pipeline, runs the gold set against the live skill registry, prints per-(skill, channel) Brier / ECE / agreement, exits non-zero on regressions when `EVAL_BRIER_THRESHOLD` is set. |
@@ -469,14 +470,19 @@ The kernel is real; the agent + connector roster is sparse on purpose. The roadm
 | **Skills + tools layer** | Skill / tool registries in `@inertial/core`, `SKILL_CATALOG` of installable modules, `skill_registrations` persistence, dashboard catalog picker + per-instance hot toggle, factory-shaped cloud skills, `db.author.list-history` + `db.events.find-similar` + `db.embeddings.get` tools | Adding a skill becomes a registration row, not a code change. The reviewer can wire Voyage / Anthropic / etc. without touching YAML. |
 | **Context engine** | `ContextAgent` composing `text-context-author@local` + `text-context-similar@local`. Voyage embeddings populate `event_embeddings` inline on every text-bearing event. Author history + similar events surface in the queue detail panel. | "Has this user done this before? Has anything like this happened before?" answered for every queued item. |
 | **Eval harness + reviewer-tagged corpus** | `@inertial/eval` (Brier / ECE / agreement scoring), `gold_events` + `eval_runs` + `skill_calibrations` tables, JSONL gold-set v1 (30 hand-labeled cases), `pnpm eval` CLI with summary table, runciter `/v1/eval/runs` endpoints, Insights tab live, **reviewer-tag layer** (`TAG_CATALOG`, `reviewer_tags` table, per-modality / per-segment scoping, in-line tag picker on every queued item) | Calibration becomes hash-chained, not vibes. Every reviewer commit grows the gold set automatically (auto-promotion). The "good video bad audio" mixed-validity case gets a precise label, not a whole-asset verdict. |
+| **Video moderation (v1: keyframes)** | `video-frame-extract@local` skill (system ffmpeg), `VideoAgent` composing extract → image-classify on each frame, `video-segment` evidence with `keyframeUrl`, dashboard `<VideoFramesSection>` rendering per-keyframe scores in a horizontal strip | Video joins the substrate as just-another-modality. The architecture's claim — "video is a sequence of images, our image skills generalize" — holds in practice. ffmpeg is opt-in (`brew install ffmpeg`) so the text-only quick-start path stays clean. |
 
 ### In flight
 
-- **More inertials.** `vision-ollama` (LLaVA / qwen2.5-vl), `audio-whisper-local`, `phash-similarity`, expanded `@inertial/agents-cloud` (OpenAI, Gemini).
-- **Video moderation.** ffmpeg-driven keyframe extraction → existing image skills, Whisper transcription → existing text skills, Gemini multi-frame for temporal reasoning. The schema (`video-segment` evidence, video modality) already supports it.
+- **Video deep (v2).** Whisper-local audio transcription → existing text skills, Gemini multi-frame for temporal reasoning, audio-only stream support.
+- **More inertials.** `vision-ollama` (LLaVA / qwen2.5-vl), `phash-similarity`, expanded `@inertial/agents-cloud` (OpenAI, Gemini).
 - **Pipeline stages with budgets.** Per-modality cost caps, confidence-based escalation: cheap triage inertials short-circuit when confident; only the ambiguous middle goes to cloud.
 - **Real connectors.** ActivityPub / AT Protocol firehose subscribers.
 - **Tag-aware skills.** A `text-context-precedent@rag` skill that calls a `db.tags.find-similar` tool and surfaces "5 prior cases tagged `audio.harassment`, reviewers went 4 remove / 1 escalate" as in-context evidence for cloud skills.
+
+### Sibling kits
+
+- **[`tag-kit`](https://github.com/akaieuan/tag-kit)** — domain-agnostic structured tagging primitives (catalog + scope-aware matching + PRF scoring + headless React `TagPicker` / `TagChip`). `inertial`'s `TAG_CATALOG` + reviewer-tag layer was extracted into `tag-kit` so other HITL annotation workflows (medical, legal, ML training data) can reuse the same substrate.
 
 ### Capturing fresh screenshots
 

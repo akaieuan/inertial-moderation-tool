@@ -1,15 +1,12 @@
-import { BaseAgent, type AgentContext } from "@inertial/core";
-import type { ContentEvent, Modality, SignalChannel } from "@inertial/schemas";
+// Skills — fine-grained, swappable units of capability
+export {
+  videoFrameExtractSkill,
+  ffmpegAvailable,
+  _resetFfmpegCache,
+  type VideoFrameExtractInput,
+  type VideoFrameExtractOutput,
+  type ExtractedFrame,
+} from "./skills/frame-extract.js";
 
-export class VideoAgent extends BaseAgent {
-  readonly name = "video-agent";
-  readonly modalities: readonly Modality[] = ["video"];
-  readonly model = "stub-video-v0";
-
-  protected override async analyze(
-    _event: ContentEvent,
-    _ctx: AgentContext,
-  ): Promise<SignalChannel[]> {
-    return [];
-  }
-}
+// Agent — composes whichever skills the worker registered
+export { VideoAgent } from "./agent.js";

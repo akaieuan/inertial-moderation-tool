@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronUp, X as CloseIcon, Tag } from "lucide-react";
+import { Check, ChevronUp, Film, X as CloseIcon, Tag } from "lucide-react";
 import type {
   AgentTrace,
   ReviewerTag,
   ReviewItem,
   ReviewVerdict,
+  SignalChannel,
   StructuredSignal,
 } from "@inertial/schemas";
 import { MiniTrace, type TraceStep } from "../components/hitl/MiniTrace.js";
@@ -299,6 +300,8 @@ function DetailBody({
           )}
         </div>
       )}
+
+      {signal && <VideoFramesSection signal={signal} />}
 
       <ReviewerTagsSection
         persisted={persistedTags}
@@ -624,6 +627,146 @@ function SimilarityBar({ similarity }: { similarity: number }) {
       <span className="font-mono tabular-nums text-muted-foreground">
         {similarity.toFixed(2)}
       </span>
+    </div>
+  );
+}
+
+interface FrameWithChannels {
+  /** keyframeUrl from the video-segment evidence — also the dedupe key. */
+  url: string;
+  timestampSec: number;
+  /** Channels whose evidence pointed at this frame. The metadata-only
+   *  `video.frames-extracted` channel is filtered out so the chip list
+   *  only shows actual classifier scores. */
+  channels: SignalChannel[];
+}
+
+interface FrameStrip {
+  /** Source video MediaAsset id — one strip per video. */
+  mediaAssetId: string;
+  frames: FrameWithChannels[];
+}
+
+/**
+ * Pull every video-segment evidence pointer out of the signal, group by
+ * source video + dedupe by keyframe URL, and pair each frame with the
+ * channels that referenced it.
+ */
+function collectFrameStrips(signal: StructuredSignal): FrameStrip[] {
+  const byVideo = new Map<string, Map<string, FrameWithChannels>>();
+
+  for (const channel of Object.values(signal.channels)) {
+    for (const ev of channel.evidence) {
+      if (ev.kind !== "video-segment" || !ev.keyframeUrl) continue;
+      const videoMap = byVideo.get(ev.mediaAssetId) ?? new Map<string, FrameWithChannels>();
+      const existing = videoMap.get(ev.keyframeUrl);
+      if (existing) {
+        // The metadata-only "video.frames-extracted" channel attaches every
+        // frame; we don't list it as an actual classifier hit on the frame.
+        if (channel.channel !== "video.frames-extracted") {
+          existing.channels.push(channel);
+        }
+      } else {
+        videoMap.set(ev.keyframeUrl, {
+          url: ev.keyframeUrl,
+          timestampSec: ev.startSec,
+          channels:
+            channel.channel === "video.frames-extracted" ? [] : [channel],
+        });
+      }
+      byVideo.set(ev.mediaAssetId, videoMap);
+    }
+  }
+
+  const strips: FrameStrip[] = [];
+  for (const [mediaAssetId, frames] of byVideo) {
+    const sorted = Array.from(frames.values()).sort(
+      (a, b) => a.timestampSec - b.timestampSec,
+    );
+    strips.push({ mediaAssetId, frames: sorted });
+  }
+  return strips;
+}
+
+function VideoFramesSection({ signal }: { signal: StructuredSignal }) {
+  const strips = useMemo(() => collectFrameStrips(signal), [signal]);
+  if (strips.length === 0) return null;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <Film className="h-3 w-3 text-muted-foreground" strokeWidth={1.75} />
+          <SectionLabel>Video frames</SectionLabel>
+        </div>
+        <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+          {strips.reduce((acc, s) => acc + s.frames.length, 0)} frame
+          {strips.reduce((acc, s) => acc + s.frames.length, 0) === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="mt-2 flex flex-col gap-3">
+        {strips.map((strip) => (
+          <FrameStripView key={strip.mediaAssetId} strip={strip} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FrameStripView({ strip }: { strip: FrameStrip }) {
+  return (
+    <div>
+      <div className="mb-1.5 font-mono text-[10px] text-muted-foreground">
+        video {strip.mediaAssetId.slice(0, 8)} · {strip.frames.length} keyframes
+      </div>
+      <div className="-mx-1 overflow-x-auto">
+        <div className="flex gap-2 px-1 pb-1">
+          {strip.frames.map((frame) => (
+            <FrameThumb key={frame.url} frame={frame} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FrameThumb({ frame }: { frame: FrameWithChannels }) {
+  const topChannel = frame.channels.sort(
+    (a, b) => b.probability - a.probability,
+  )[0];
+  return (
+    <div className="flex w-32 shrink-0 flex-col gap-1">
+      <div className="relative h-20 w-32 overflow-hidden rounded-md border border-border bg-muted/40">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={frame.url}
+          alt={`frame at ${frame.timestampSec.toFixed(1)}s`}
+          className="h-full w-full object-cover"
+          // file:// URLs from the local frame-extract skill won't load in a
+          // standard browser; Electron renderer with webSecurity off does.
+          // Rather than blocking demo mode, we let the broken-image fallback
+          // do the right thing and the timestamp + channel chips still render.
+          onError={(e) => {
+            (e.currentTarget as HTMLImageElement).style.opacity = "0.2";
+          }}
+        />
+        <span className="absolute right-1 top-1 rounded bg-background/80 px-1 font-mono text-[9px] tabular-nums">
+          {frame.timestampSec.toFixed(1)}s
+        </span>
+      </div>
+      {topChannel && (
+        <div className="flex items-baseline gap-1.5 text-[10px]">
+          <span className="truncate font-mono">{topChannel.channel}</span>
+          <span className="font-mono tabular-nums text-muted-foreground">
+            {topChannel.probability.toFixed(2)}
+          </span>
+        </div>
+      )}
+      {frame.channels.length === 0 && (
+        <div className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground/60">
+          no scores
+        </div>
+      )}
     </div>
   );
 }

@@ -28,6 +28,11 @@ import {
 } from "@inertial/agents-text";
 import { VisionAgent } from "@inertial/agents-vision";
 import {
+  VideoAgent,
+  ffmpegAvailable,
+  videoFrameExtractSkill,
+} from "@inertial/agents-video";
+import {
   anthropicAvailable,
   imageNsfwAnthropicSkill,
   textToxicityAnthropicSkill,
@@ -84,6 +89,11 @@ if (INCLUDE_CLOUD && voyageAvailable()) {
   skills.register(textEmbedVoyageSkill);
 }
 
+if (await ffmpegAvailable()) {
+  skills.register(videoFrameExtractSkill);
+  console.log("[eval] video skill registered: video-frame-extract@local");
+}
+
 // 3. Tools.
 const tools = new ToolRegistry()
   .register(makeAuthorHistoryTool(db))
@@ -95,6 +105,7 @@ const runciter = new InMemoryRunciter({
   agents: [
     new TextAgent(),
     new VisionAgent(["image-classify@anthropic"]),
+    new VideoAgent(),
     new ContextAgent(),
   ],
   skills,

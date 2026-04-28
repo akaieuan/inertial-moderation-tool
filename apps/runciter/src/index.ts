@@ -24,6 +24,11 @@ import {
 } from "@inertial/agents-text";
 import { VisionAgent } from "@inertial/agents-vision";
 import {
+  VideoAgent,
+  ffmpegAvailable,
+  videoFrameExtractSkill,
+} from "@inertial/agents-video";
+import {
   anthropicAvailable,
   imageNsfwAnthropicSkill,
   textToxicityAnthropicSkill,
@@ -146,6 +151,15 @@ if (voyageAvailable()) {
   );
 }
 
+if (await ffmpegAvailable()) {
+  skills.register(videoFrameExtractSkill);
+  console.log("[runciter] video skill registered: video-frame-extract@local");
+} else {
+  console.log(
+    "[runciter] ffmpeg not on PATH — video-frame-extract@local NOT registered (install with `brew install ffmpeg`; video events will get no signal)",
+  );
+}
+
 // 4. Apply per-instance skill governance (block-list, exec-model gates,
 //    data-leaving-machine gate). Mutates the registry in place.
 applySkillsPolicy(skills, policy.skills);
@@ -208,6 +222,10 @@ const runciter = new InMemoryRunciter({
   agents: [
     new TextAgent(),
     new VisionAgent(["image-classify@anthropic"]),
+    // VideoAgent extracts keyframes via ffmpeg and pipes each through any
+    // registered image-classification skill. Degrades to no-op when ffmpeg
+    // is missing OR no image classifier is registered.
+    new VideoAgent(),
     // ContextAgent runs on every event regardless of modality; its skills
     // degrade gracefully when prerequisites (embeddings, history) are missing.
     new ContextAgent(),

@@ -17,6 +17,9 @@ importers:
       '@inertial/agents-text':
         specifier: workspace:*
         version: link:packages/agents/text
+      '@inertial/agents-video':
+        specifier: workspace:*
+        version: link:packages/agents/video
       '@inertial/agents-vision':
         specifier: workspace:*
         version: link:packages/agents/vision
@@ -157,6 +160,9 @@ importers:
       '@inertial/agents-text':
         specifier: workspace:*
         version: link:../../packages/agents/text
+      '@inertial/agents-video':
+        specifier: workspace:*
+        version: link:../../packages/agents/video
       '@inertial/agents-vision':
         specifier: workspace:*
         version: link:../../packages/agents/vision
@@ -275,6 +281,9 @@ importers:
       typescript:
         specifier: ^5.7.3
         version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.17)(lightningcss@1.32.0)
 
   packages/agents/vision:
     dependencies:

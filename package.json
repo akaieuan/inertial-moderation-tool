@@ -37,6 +37,7 @@
     "@inertial/agents-cloud": "workspace:*",
     "@inertial/agents-context": "workspace:*",
     "@inertial/agents-text": "workspace:*",
+    "@inertial/agents-video": "workspace:*",
     "@inertial/agents-vision": "workspace:*",
     "@inertial/core": "workspace:*",
     "@inertial/db": "workspace:*",
