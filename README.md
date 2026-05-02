@@ -4,9 +4,9 @@
 
 > *AI classification outputs and human review actions should both land in a hash-chained audit log, with typed structured signals as the unit of evidence and per-instance YAML as the unit of policy.*
 
-What's real: schema-first Zod contracts across 12+ shapes, a skill/tool registry with a catalog + per-instance registration table, a YAML policy evaluator with hash-chained `/verify`, an eval harness scoring per-(skill, channel) Brier/ECE/agreement, a reviewer-tag layer with per-modality / per-segment scope, and a reviewer dashboard wired to all of it.
+What's real: schema-first Zod contracts across 33 typed shapes, a skill/tool registry with a catalog + per-instance registration table, a YAML policy evaluator with hash-chained `/verify`, an eval harness scoring per-(skill, channel) Brier/ECE/agreement, a reviewer-tag layer with per-modality / per-segment scope, and a reviewer dashboard wired to all of it.
 
-What's stubbed (deliberately): every source connector (Mastodon, Bluesky, Lemmy, Discord, Slack), the action dispatcher that pushes decisions back to source platforms, all `agents-*` packages except text + context, audio entirely, and any auth / observability layer. The architecture diagram below documents the *target* shape; what runs today is a verification substrate with a reference UI on top.
+What's stubbed (deliberately): every source connector (Mastodon, Bluesky, Lemmy, Discord, Slack), the action dispatcher that pushes decisions back to source platforms, the `agents-audio` and `agents-identity` packages (each is a single class returning `[]`), gateway media download + perceptual hashing, and any auth / observability layer. The architecture diagram below documents the *target* shape; what runs today is a verification substrate with a reference UI on top.
 
 This is portfolio work, not a maintained OSS project. The point is the architecture choices and where they hold up, not feature completeness.
 
@@ -114,7 +114,7 @@ That thesis — verification substrate, not vendor API — is what's actually bu
 - **Not a model.** Composes existing classifiers (toxic-bert, Claude, Voyage) under typed contracts. Does not train anything.
 - **Not statistically validated.** The 31-event gold set demonstrates the calibration math is correct; per-channel sample sizes (1-15) are too small to make any actual claim about any skill's real-world accuracy.
 - **Not multimodal in the way that phrase usually means.** Audio is fully unimplemented. Video is keyframe extraction plus per-frame image classification — no temporal reasoning, no audio track, no scene-change detection.
-- **Not a complete moderation toolkit.** The dashboard, audit log, eval harness, and skill registry are real. Six of the seven `@inertial/agents-*` packages are stubs. Two of the four planned connector packages don't even have a placeholder.
+- **Not a complete moderation toolkit.** The dashboard, audit log, eval harness, and skill registry are real. Two of the seven `@inertial/agents-*` packages (audio, identity) are pure stubs that return `[]`; the remaining five (text, vision, video, context, cloud) ship real composition logic. All four connector packages exist as empty placeholders only — none of them ingest from a real source platform.
 - **Not a maintained OSS project.** No CONTRIBUTING.md, no issue templates, no triage commitment. If you want to use any of this, fork it.
 
 ---
@@ -123,9 +123,9 @@ That thesis — verification substrate, not vendor API — is what's actually bu
 
 ```
                 ┌─────────────┐
-   Connectors ─▶│   Gateway   │  Hono ingest. Normalizes platform payloads
-                │   (Hono)    │  into ContentEvents. Owns media download
-                └──────┬──────┘  + perceptual hashing.
+   Connectors ─▶│   Gateway   │  Hono ingest. Validates + normalizes platform
+                │   (Hono)    │  payloads into ContentEvents, forwards to
+                └──────┬──────┘  runciter. Media download + phash: TODO.
                        │
                        ▼
                 ┌─────────────┐
@@ -135,11 +135,11 @@ That thesis — verification substrate, not vendor API — is what's actually bu
                 └──────┬──────┘
         ┌──────────────┼──────────────┐
         ▼              ▼              ▼
-  ┌──────────┐  ┌──────────┐  ┌──────────┐    Tier 0 (heuristic)
-  │  text-   │  │  phash-  │  │   ...    │    Tier 1 (transformers.js WASM)
-  │  regex   │  │ similar  │  │ vision-  │    Tier 2 (Ollama @ :11434)
-  │          │  │          │  │  ollama  │    Tier 3 (Anthropic / OpenAI)
-  └────┬─────┘  └────┬─────┘  └────┬─────┘    (each box = one inertial)
+  ┌──────────┐  ┌──────────┐  ┌──────────┐    Tier 0 (heuristic, in-proc JS)
+  │  text-   │  │toxic-bert│  │  image-  │    Tier 1 (transformers.js WASM)
+  │  detect- │  │  @local  │  │ classify │    Tier 2 (Ollama @ :11434 — empty)
+  │spam-link │  │  (WASM)  │  │@anthropic│    Tier 3 (Anthropic / Voyage)
+  └────┬─────┘  └────┬─────┘  └────┬─────┘    (each box = one shipped skill)
        └─────────────┼─────────────┘
                      ▼
               ┌─────────────┐
@@ -172,11 +172,11 @@ Every box has a corresponding `@inertial/*` package. Every cross-package shape i
 
 ## Skill tiers (what's actually demonstrated)
 
-The architecture supports four execution tiers. **Today, only two are exercised.** Tier 2 (local server / Ollama) has no skill implementations; Tier 0 has one (regex URL detection). Below is the honest mapping of tier → what ships, not what could theoretically run.
+The architecture supports four execution tiers. **Three of the four are exercised today** — Tier 2 (local server / Ollama) has no shipped skill yet. Below is the honest mapping of tier → what ships, not what could theoretically run.
 
 | Tier | Where it runs | Install | What ships today |
 |---|---|---|---|
-| **0. Heuristic** | In-process JS | nothing | `text-detect-spam-link` (regex URL detection) |
+| **0. Heuristic** | In-process JS | nothing | `text-detect-spam-link` (regex URL detection), `text-context-author@local` (DB-backed author-history lookup) |
 | **1. Local WASM** | `@huggingface/transformers` ONNX runtime | nothing — model auto-downloads to `~/.cache/huggingface/hub` | `text-classify-toxicity@local` (toxic-bert) |
 | **2. Local server** | Ollama daemon at `localhost:11434` | `brew install ollama && ollama pull llama3.2-vision` | nothing yet — planned for the in-flight `vision-ollama` work |
 | **3. Cloud** | Anthropic / Voyage / (future) OpenAI / Gemini | `@inertial/agents-cloud` package + per-skill API key wired through the dashboard catalog | `text-classify-toxicity@anthropic`, `image-classify@anthropic`, `text-embed@voyage`, **video frame-by-frame** (extract via local ffmpeg → image-classify@anthropic per keyframe) |
@@ -189,7 +189,7 @@ What's actually working today, by modality:
 
 | Modality | Tier 0 | Tier 1 | Tier 2 | Tier 3 |
 |---|---|---|---|---|
-| Text — spam links | full | full | — | — |
+| Text — spam links | full | — | — | — |
 | Text — toxicity | — | ~70% (toxic-bert) | — | ~90% (Claude) |
 | Image — NSFW / violence / minor / self-harm | — | — | — | ~85% (Claude Vision) |
 | Video — frame-level | phash on keyframes (planned) | — | — | ffmpeg keyframe extract → Claude Vision per-frame |
@@ -203,7 +203,7 @@ Local-first is not a magic bullet. **For high-stakes content (minor detection, v
 
 ## Run the demo locally
 
-This boots the full pipeline against an in-memory pglite + 10 hand-crafted events. No real ingestion happens; there's no source connector. You're running the verification substrate against synthetic input to see what the audit log, eval harness, and dashboard look like wired together.
+This boots the full pipeline against an in-memory pglite + 13 hand-crafted events (10 text + 3 image fixtures). No real ingestion happens; there's no source connector. You're running the verification substrate against synthetic input to see what the audit log, eval harness, and dashboard look like wired together.
 
 Requires Node ≥20 and pnpm 10. The text path needs no other deps.
 
@@ -234,7 +234,7 @@ pnpm --filter @inertial/runciter dev
 # 2. Gateway — HTTP ingest on :4000
 pnpm --filter @inertial/gateway dev
 
-# 3. Seed 10 hand-crafted events through the full pipeline
+# 3. Seed 13 hand-crafted events (10 text + 3 image) through the full pipeline
 pnpm seed
 ```
 
@@ -281,8 +281,8 @@ pnpm eval
 ```
 
 Boots an in-memory pipeline, dispatches the 31-event hand-labeled gold set
-(`config/evals/gold-set-v1.jsonl` — 30 text + 1 video) through the live
-skill registry, and prints per-(skill, channel) Brier / ECE / agreement:
+(`config/evals/gold-set-v1.jsonl` — 27 text + 3 image + 1 video) through the
+live skill registry, and prints per-(skill, channel) Brier / ECE / agreement:
 
 ```
 skill                                  channel                  brier     ece   agree  samples
@@ -391,7 +391,7 @@ config/
     default.yaml        Default policy (toxicity + spam-link rules)
   evals/                Gold sets, suites (empty)
 scripts/
-  seed.mjs              10 hand-crafted events through gateway → runciter
+  seed.mjs              13 hand-crafted events (10 text + 3 image) through gateway → runciter
   smoke.mjs             Single-event smoke test
 docker-compose.yml      Postgres + pgvector for prod-shape persistence
 ```

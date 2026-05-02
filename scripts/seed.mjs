@@ -34,10 +34,10 @@ function imageMedia(url, width = 320, height = 240) {
 }
 
 /**
- * Each entry: a short label + the text payload + the expected policy outcome
- * (for human-readable diff against actual). Content is deliberately
- * tame-but-classifiable so toxic-bert can score it without the seed file
- * being a slur archive.
+ * 13 entries (10 text + 3 image fixtures): a short label + the text payload +
+ * the expected policy outcome (for human-readable diff against actual). Content
+ * is deliberately tame-but-classifiable so toxic-bert can score it without the
+ * seed file being a slur archive.
  */
 const SAMPLES = [
   {
