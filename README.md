@@ -322,9 +322,9 @@ Two tables. The first is what runs. The second is what doesn't and why it matter
 
 | Component | Status |
 |---|---|
-| `@inertial/schemas` | Real. 12+ Zod schemas: ContentEvent, StructuredSignal, AgentTrace, ReviewItem, ReviewDecision (+ `reviewerTags`), Policy, AuditEntry, SkillRegistration, GoldEvent, EvalRun, SkillCalibration, ReviewerTag + scope, TagAgreement. |
+| `@inertial/schemas` | Real. 33 Zod schemas: ContentEvent, StructuredSignal, AgentTrace, ReviewItem, ReviewDecision (+ `reviewerTags`), Policy, AuditEntry, SkillRegistration, GoldEvent, EvalRun, SkillCalibration, ReviewerTag + scope, TagAgreement, plus all the inner shapes (Probability, EvidencePointer, SignalChannel, ExtractedEntity, Modality, Source, MediaAsset, Author, InstanceContext, …). |
 | `@inertial/core` | Real. BaseAgent + TraceCollector + InMemoryRunciter, SkillRegistry + ToolRegistry, `SKILL_CATALOG`, `TAG_CATALOG` (~18 starter tags). |
-| `@inertial/db` | Real. 14 tables (incl. `skill_registrations`, `gold_events`, `eval_runs`, `skill_calibrations`, `reviewer_tags`, `event_embeddings`). **68 hermetic integration tests.** Hash-chained audit with tamper detection. |
+| `@inertial/db` | Real. 13 tables (incl. `skill_registrations`, `gold_events`, `eval_runs`, `skill_calibrations`, `reviewer_tags`, `event_embeddings`). **68 hermetic integration tests.** Hash-chained audit with tamper detection. |
 | `@inertial/policy` | Real. YAML loader + structured AST evaluator. First-match wins; per-instance versioning. Confidence-based escalation working. |
 | `@inertial/eval` | Real. Brier / ECE / agreement + tag-PRF scoring, calibration aggregator, JSONL loader, reviewer-derived auto-promotion, persistence-agnostic runner. **30 unit tests.** |
 | `apps/gateway` | Real. Hono ingest, normalizes payloads, forwards to runciter. |
@@ -334,7 +334,9 @@ Two tables. The first is what runs. The second is what doesn't and why it matter
 | `text-toxicity-local` (Tier 1) | Real. `Xenova/toxic-bert` via transformers.js. ~50ms/event after warmup. |
 | `text-context-author@local` + `text-context-similar@local` | Real. Context skills via `db.author.list-history` + `db.events.find-similar` tools. |
 | `video-frame-extract@local` + `VideoAgent` | Real. System ffmpeg keyframe extraction; composes any registered image classifier per-frame; emits `video-segment` evidence the dashboard renders as a thumbnail strip. Skipped at boot when ffmpeg is missing. |
-| `vision-*`, `audio-*`, `identity-*` inertials | Stubbed. Empty `analyze()` returning `[]`. (Cloud vision works via `image-classify@anthropic` from `@inertial/agents-cloud`.) |
+| `audio-*`, `identity-*` inertials | Stubbed. Empty `analyze()` returning `[]`. (No local audio or identity skill ships; audio is unimplemented entirely.) |
+| `VisionAgent` | Real composition layer — runs whichever image-classification skills the worker registered. No local vision model ships; cloud vision works via `image-classify@anthropic` from `@inertial/agents-cloud`. |
+| `ContextAgent` | Real. Composes `text-context-author@local` + `text-context-similar@local` (Voyage embeddings via `db.events.find-similar`). |
 | `connectors-{activitypub,atproto,lemmy,sdk-webhook}` | Stubbed. |
 | `@inertial/agents-cloud` | Real. Anthropic text-toxicity + image-NSFW + Voyage embeddings — all factory-shaped so per-instance API keys work via the catalog. |
 | `pnpm eval` | Real. Boots an in-memory pipeline, runs the gold set against the live skill registry, prints per-(skill, channel) Brier / ECE / agreement, exits non-zero on regressions when `EVAL_BRIER_THRESHOLD` is set. |
@@ -369,13 +371,13 @@ packages/
   schemas/              @inertial/schemas         — Zod contracts
   core/                 @inertial/core            — BaseAgent, Runciter, aggregator
   agents/
-    text/               @inertial/agents-text     — text-regex, text-toxicity-local
-    cloud/              @inertial/agents-cloud    — Anthropic / OpenAI / Gemini skills
-    vision/             @inertial/agents-vision   — (stub)
-    video/              @inertial/agents-video    — (stub)
-    audio/              @inertial/agents-audio    — (stub)
-    identity/           @inertial/agents-identity — (stub)
-    context/            @inertial/agents-context  — (stub)
+    text/               @inertial/agents-text     — text-detect-spam-link, text-classify-toxicity@local
+    cloud/              @inertial/agents-cloud    — Anthropic text + image, Voyage embeddings
+    vision/             @inertial/agents-vision   — VisionAgent composition (no local vision skill yet)
+    video/              @inertial/agents-video    — VideoAgent + video-frame-extract@local (ffmpeg)
+    audio/              @inertial/agents-audio    — (stub: returns [])
+    identity/           @inertial/agents-identity — (stub: returns [])
+    context/            @inertial/agents-context  — text-context-author@local, text-context-similar@local
   connectors/
     activitypub/        @inertial/connectors-activitypub  — (stub)
     atproto/            @inertial/connectors-atproto      — (stub)
@@ -383,7 +385,7 @@ packages/
     sdk-webhook/        @inertial/connectors-sdk-webhook  — (stub)
   policy/               @inertial/policy          — YAML loader + AST evaluator
   db/                   @inertial/db              — Drizzle + Postgres + pgvector + hash-chained audit
-  eval/                 @inertial/eval            — wraps @eval-kit/core (stub)
+  eval/                 @inertial/eval            — Brier/ECE/agreement scoring + JSONL loader + reviewer-derived auto-promotion
   sdk/                  @inertial/sdk             — public SDK surface (stub)
   registry/             @inertial/registry        — shadcn-compatible UI primitives (stub)
 config/
@@ -504,9 +506,9 @@ This is the order pillars landed during the build, not a commitment to keep buil
 
 | Pillar | What landed | Why it matters |
 |---|---|---|
-| **Foundations** | `@inertial/schemas` (8 Zod contracts), `@inertial/core` (Runciter, BaseAgent, max-confidence aggregator), gateway + runciter shells, end-to-end smoke | Every cross-package shape is a typed Zod schema. The runciter dispatches inertials; humans decide. |
-| **Persistence + audit** | `@inertial/db` (Drizzle + Postgres + pgvector), 8 tables, **hash-chained audit log with tamper detection**, pglite dev factory, 41 hermetic integration tests | "No remote API touched my instance over the last 30 days" becomes a hash-chained artifact, not a promise. |
-| **Live moderation pipeline** | Real `text-toxicity-local` (`Xenova/toxic-bert` via transformers.js, ~50ms/event after warmup), `@inertial/policy` YAML evaluator, DB-persisted pipeline, dashboard reading live data, decision commit flow | Seed 10 events → see them route to queues → approve/remove from the dashboard → audit log grows. |
+| **Foundations** | `@inertial/schemas` (33 typed shapes), `@inertial/core` (Runciter, BaseAgent, max-confidence aggregator), gateway + runciter shells, end-to-end smoke | Every cross-package shape is a typed Zod schema. The runciter dispatches inertials; humans decide. |
+| **Persistence + audit** | `@inertial/db` (Drizzle + Postgres + pgvector), 13 tables, **hash-chained audit log with tamper detection**, pglite dev factory, 68 hermetic integration tests | "No remote API touched my instance over the last 30 days" becomes a hash-chained artifact, not a promise. |
+| **Live moderation pipeline** | Real `text-toxicity-local` (`Xenova/toxic-bert` via transformers.js, ~50ms/event after warmup), `@inertial/policy` YAML evaluator, DB-persisted pipeline, dashboard reading live data, decision commit flow | Seed 13 events → see them route to queues → approve/remove from the dashboard → audit log grows. |
 | **Vision + split-pane review** | Claude Vision moderation (`image-classify@anthropic`), split-pane queue → detail layout, evidence rendering with bbox overlays | Image flags get the same audit + reviewer treatment as text. |
 | **Shadow runs + compliance** | Skills can run as `shadow:` peers; their decisions are recorded silently. Compliance tab surfaces per-skill agreement vs. the human reviewer. | Free continuous gold-set generation. Calibration data flows back into the eval harness. |
 | **Reviewer experience** | Dashboard FlagMap heatmap with hover stats, three-deck queue layout with inline review session, Pipelines visual canvas, Skills create sheet, Insights rebuilt on internal primitives, side panels (Chat / Notes / Agent activity) docked edge-to-edge | The dashboard reads as one app instead of seven loosely related views. See [`docs/screenshots/`](docs/screenshots/). |
